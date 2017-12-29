@@ -20,7 +20,7 @@ int main ( int argc, char** argv )
     gslam::Config::setParameterFile ( argv[1] );
     gslam::VisualOdometry::Ptr vo ( new gslam::VisualOdometry );
 
-    string dataset_dir = gslam::Config::get<string> ( "dataset_dir" );
+	string dataset_dir = gslam::Config::get<string>("dataset_dir");
     cout<<"dataset: "<<dataset_dir<<endl;
     ifstream fin ( dataset_dir+"/associate.txt" );
     if ( !fin )
@@ -59,6 +59,7 @@ int main ( int argc, char** argv )
     vis.showWidget ( "Camera", camera_coor );
 
     cout<<"read total "<<rgb_files.size() <<" entries"<<endl;
+	vector<SE3<double> > estimated_pose;
     for ( int i=0; i<rgb_files.size(); i++ )
     {
         cout<<"****** loop "<<i<<" ******"<<endl;
@@ -79,7 +80,7 @@ int main ( int argc, char** argv )
         if ( vo->state_ == gslam::VisualOdometry::LOST )
             break;
         Sophus::SE3<double> Twc = pFrame->T_c_w_.inverse();
-
+		estimated_pose.push_back(pFrame->T_c_w_);
         // show the map and the camera pose
         cv::Affine3d M (
             cv::Affine3d::Mat3 (
@@ -107,6 +108,17 @@ int main ( int argc, char** argv )
 
         cout<<endl;
     }
-
+	ofstream fo(dataset_dir + "/estimatedpose.txt");
+	for (size_t i = 0; i < estimated_pose.size(); ++i) {
+		const SE3<double>& se3(estimated_pose[i]);
+		fo << rgb_times[i] << "\t" << se3.translation().x()<<" "
+			<< se3.translation().y() << " "
+			<< se3.translation().z() << " "
+			<< se3.unit_quaternion().x()<< " " 
+			<< se3.unit_quaternion().y() << " " 
+			<< se3.unit_quaternion().z() << " " 
+			<< se3.unit_quaternion().w() << endl;
+	}
+	fo.close();
     return 0;
 }
