@@ -29,13 +29,14 @@ int main ( int argc, char** argv )
         return 1;
     }
 
-    vector<string> rgb_files, depth_files;
+    vector<string> rgb_files, depth_files, rgb_times_str;
     vector<double> rgb_times, depth_times;
     while ( !fin.eof() )
     {
         string rgb_time, rgb_file, depth_time, depth_file;
         fin>>rgb_time>>rgb_file>>depth_time>>depth_file;
         rgb_times.push_back ( atof ( rgb_time.c_str() ) );
+		rgb_times_str.push_back(rgb_time);
         depth_times.push_back ( atof ( depth_time.c_str() ) );
         rgb_files.push_back ( dataset_dir+"/"+rgb_file );
         depth_files.push_back ( dataset_dir+"/"+depth_file );
@@ -111,7 +112,7 @@ int main ( int argc, char** argv )
 	ofstream fo(dataset_dir + "/estimatedpose.txt");
 	for (size_t i = 0; i < estimated_pose.size(); ++i) {
 		const SE3<double>& se3(estimated_pose[i]);
-		fo << rgb_times[i] << "\t" << se3.translation().x()<<" "
+		fo << rgb_times_str[i] << "\t" << se3.translation().x()<<" "
 			<< se3.translation().y() << " "
 			<< se3.translation().z() << " "
 			<< se3.unit_quaternion().x()<< " " 
@@ -122,3 +123,4 @@ int main ( int argc, char** argv )
 	fo.close();
     return 0;
 }
+
