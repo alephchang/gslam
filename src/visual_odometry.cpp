@@ -206,11 +206,22 @@ void VisualOdometry::poseEstimationPnP()
 
     g2o::VertexSE3Expmap* pose = new g2o::VertexSE3Expmap();
     pose->setId ( 0 );
-    pose->setEstimate ( g2o::SE3Quat (
-        T_c_w_estimated_.rotationMatrix(), T_c_w_estimated_.translation()
-    ));
+//	Sophus::Matrix3d rot = T_c_w_estimated_.rotationMatrix();
+//	Sophus::Vector3d tran = T_c_w_estimated_.translation();
+//	Eigen::Quaterniond se3_r(T_c_w_estimated_.rotationMatrix());
 
-    optimizer.addVertex ( pose );
+//	pose->setEstimate(g2o::SE3Quat(se3_r, tran));
+//    pose->setEstimate ( g2o::SE3Quat (
+//		se3_r, T_c_w_estimated_.translation()
+//    ));
+
+	Eigen::Quaterniond se3_r(T_c_w_estimated_.rotationMatrix());
+	g2o::SE3Quat Tcw;// = g2o::SE3Quat(se3_r, T_c_w_estimated_.translation());
+	Tcw.setRotation(se3_r);
+	Tcw.setTranslation(T_c_w_estimated_.translation());
+	pose->setEstimate(Tcw);
+	optimizer.addVertex(pose);
+
 
     // edges
     for ( int i=0; i<inliers.rows; i++ )

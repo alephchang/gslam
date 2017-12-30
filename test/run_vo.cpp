@@ -1,15 +1,15 @@
+#include"run_vo.h"
+
+#include "gslam/g2o_types.h"
+
+#include <boost/algorithm/string.hpp>
+#include <boost/lexical_cast.hpp>
+#include<boost/timer.hpp>
+#include<windows.h> //for Sleep
 // -------------- test the visual odometry -------------
-#include <fstream>
-//#include <boost/timer.hpp>
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/viz.hpp> 
-#include <opencv2/imgproc/imgproc.hpp>
 
-#include "gslam/config.h"
-#include "gslam/visual_odometry.h"
 
-int main ( int argc, char** argv )
+int run_vo ( int argc, char** argv )
 {
     if ( argc != 2 )
     {
@@ -29,14 +29,13 @@ int main ( int argc, char** argv )
         return 1;
     }
 
-    vector<string> rgb_files, depth_files, rgb_times_str;
+    vector<string> rgb_files, depth_files;
     vector<double> rgb_times, depth_times;
     while ( !fin.eof() )
     {
         string rgb_time, rgb_file, depth_time, depth_file;
         fin>>rgb_time>>rgb_file>>depth_time>>depth_file;
         rgb_times.push_back ( atof ( rgb_time.c_str() ) );
-		rgb_times_str.push_back(rgb_time);
         depth_times.push_back ( atof ( depth_time.c_str() ) );
         rgb_files.push_back ( dataset_dir+"/"+rgb_file );
         depth_files.push_back ( dataset_dir+"/"+depth_file );
@@ -58,7 +57,7 @@ int main ( int argc, char** argv )
     camera_coor.setRenderingProperty ( cv::viz::LINE_WIDTH, 1.0 );
     vis.showWidget ( "World", world_coor );
     vis.showWidget ( "Camera", camera_coor );
-
+	
     cout<<"read total "<<rgb_files.size() <<" entries"<<endl;
 	vector<SE3<double> > estimated_pose;
     for ( int i=0; i<rgb_files.size(); i++ )
@@ -74,9 +73,9 @@ int main ( int argc, char** argv )
         pFrame->depth_ = depth;
         pFrame->time_stamp_ = rgb_times[i];
 
-//        boost::timer timer;
+        boost::timer timer;
         vo->addFrame ( pFrame );
-//        cout<<"VO costs time: "<<timer.elapsed() <<endl;
+        cout<<"VO costs time: "<<timer.elapsed() <<endl;
 
         if ( vo->state_ == gslam::VisualOdometry::LOST )
             break;
@@ -106,13 +105,14 @@ int main ( int argc, char** argv )
         cv::waitKey ( 1 );
         vis.setWidgetPose ( "Camera", M );
         vis.spinOnce ( 1, false );
-
+		
         cout<<endl;
     }
 	ofstream fo(dataset_dir + "/estimatedpose.txt");
+	fo.precision(17);
 	for (size_t i = 0; i < estimated_pose.size(); ++i) {
 		const SE3<double>& se3(estimated_pose[i]);
-		fo << rgb_times_str[i] << "\t" << se3.translation().x()<<" "
+		fo << rgb_times[i] << "\t" << se3.translation().x()<<" "
 			<< se3.translation().y() << " "
 			<< se3.translation().z() << " "
 			<< se3.unit_quaternion().x()<< " " 
@@ -124,3 +124,138 @@ int main ( int argc, char** argv )
     return 0;
 }
 
+bool load_pose_file(const string& path, vector<pair<double, SE3<double> > >& poses)
+{
+	ifstream fin(path);
+	if(!fin){
+		cout << "cannot load pose file: " << path << endl;
+		return false;
+	}
+	string line;
+	vector<string> strs;
+	while (!fin.eof())
+	{
+		getline(fin, line);
+		boost::split(strs, line, boost::is_any_of("\t "));
+		if (strs.empty() || strs[0].empty() || strs[0][0] == '#')
+			continue;
+		double time_stamp;
+		Eigen::Vector3d t(boost::lexical_cast<double>(strs[1]), 
+			boost::lexical_cast<double>(strs[2]), boost::lexical_cast<double>(strs[3]) );
+		Eigen::Quaternion<double> r(boost::lexical_cast<double>(strs[7]),
+									boost::lexical_cast<double>(strs[4]), 
+									boost::lexical_cast<double>(strs[5]),
+									boost::lexical_cast<double>(strs[6]) );
+		time_stamp = boost::lexical_cast<double>(strs[0]);
+
+		pair<double, SE3<double> > time_pose;
+		time_pose.first = time_stamp;
+		time_pose.second = SE3<double>(r, t);
+		poses.push_back(time_pose);
+	}
+	return true;
+}
+///we assume that truth_pose has higher frequence than est_pose
+///and for each item in est_pose, pick the first larger one in truth_pose.
+void filter_ground_truth(const vector<pair<double, SE3<double> > >&est_pose,
+	vector<pair<double, SE3<double> > >& truth_pose)
+{
+	vector<int> truth_idx;
+	if (est_pose.empty() || truth_pose.empty() || est_pose[0].first > truth_pose.back().first) {
+		truth_pose.clear();
+		return;
+	}
+	int j = 0;
+	for(size_t i = 0; i < est_pose.size(); ++i){
+		double current = est_pose[i].first;
+		while(j!=truth_pose.size()){
+			if(current < truth_pose[j].first){
+				truth_idx.push_back(j);
+				break;
+			}
+			j++;
+		}
+	}
+	for(size_t i = 0; i < truth_idx.size(); ++i){
+		truth_pose[i] = truth_pose[truth_idx[i]];
+	}
+	truth_pose.resize(truth_idx.size());
+}
+
+int validate_result(int argc, char** argv)
+{
+	//load estimatedpose.txt and groundtruth.txt and compare
+	if (argc != 2)
+	{
+		cout << "usage: run_vo parameter_file" << endl;
+		return 1;
+	}
+
+	gslam::Config::setParameterFile(argv[1]);
+	string dataset_dir = gslam::Config::get<string>("dataset_dir");
+	vector<pair<double, SE3<double> > > est_pose, truth_pose;
+	
+	if (load_pose_file(dataset_dir + "groundtruth.txt", truth_pose) == false
+		|| load_pose_file(dataset_dir + "estimatedpose.txt", est_pose) == false) {
+		return 1;
+	}
+
+
+	cout.precision(17);
+
+	
+	filter_ground_truth(est_pose, truth_pose);
+
+	cout << est_pose.size() << " " << truth_pose.size() << endl;
+	// visualization
+	cv::viz::Viz3d vis("Visual Odometry");
+	cv::viz::WCoordinateSystem world_coor(1.0), camera_coor(0.5);
+	cv::Point3d cam_pos(0, -1.0, -1.0), cam_focal_point(0, 0, 0), cam_y_dir(0, 1, 0);
+	cv::Affine3d cam_pose = cv::viz::makeCameraPose(cam_pos, cam_focal_point, cam_y_dir);
+	vis.setViewerPose(cam_pose);
+
+	world_coor.setRenderingProperty(cv::viz::LINE_WIDTH, 2.0);
+	camera_coor.setRenderingProperty(cv::viz::LINE_WIDTH, 1.0);
+	vis.showWidget("World", world_coor);
+	vis.showWidget("Camera", camera_coor);
+	const SE3<double> ref = truth_pose[0].second.inverse();
+	for(size_t i = 0; i < est_pose.size(); ++i){
+		// show the map and the camera pose
+		const SE3<double>& Twc = est_pose[i].second.inverse();
+		cv::Affine3d M(
+			cv::Affine3d::Mat3(
+				Twc.rotationMatrix() (0, 0), Twc.rotationMatrix() (0, 1), Twc.rotationMatrix() (0, 2),
+				Twc.rotationMatrix() (1, 0), Twc.rotationMatrix() (1, 1), Twc.rotationMatrix() (1, 2),
+				Twc.rotationMatrix() (2, 0), Twc.rotationMatrix() (2, 1), Twc.rotationMatrix() (2, 2)
+			),
+			cv::Affine3d::Vec3(
+				Twc.translation() (0, 0), Twc.translation() (1, 0), Twc.translation() (2, 0)
+			)
+		);
+		const SE3<double>& Twc_truth = ref*truth_pose[i].second;
+		cv::Affine3d M_t(
+			cv::Affine3d::Mat3(
+				Twc_truth.rotationMatrix() (0, 0), Twc_truth.rotationMatrix() (0, 1), Twc_truth.rotationMatrix() (0, 2),
+				Twc_truth.rotationMatrix() (1, 0), Twc_truth.rotationMatrix() (1, 1), Twc_truth.rotationMatrix() (1, 2),
+				Twc_truth.rotationMatrix() (2, 0), Twc_truth.rotationMatrix() (2, 1), Twc_truth.rotationMatrix() (2, 2)
+			),
+			cv::Affine3d::Vec3(
+				Twc_truth.translation() (0, 0), Twc_truth.translation() (1, 0), Twc_truth.translation() (2, 0)
+			)
+		);
+		vis.setWidgetPose("Camera", M);
+		vis.setWidgetPose("World", M_t);
+		Sleep(100);
+		cout << truth_pose[i].first - est_pose[i].first << endl;
+		vis.spinOnce(1, false);
+	}
+
+	return 0;
+}
+
+void testSE3QuatError()
+{
+	Eigen::Quaterniond se3_r;
+	g2o::SE3Quat Tcw;
+	Tcw.setRotation(se3_r);
+}

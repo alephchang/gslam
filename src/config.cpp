@@ -62,5 +62,5 @@ opencv_calib3d330d.lib
 opencv_features2d330d.lib
 opencv_xfeatures2d330d.lib
 opencv_flann330d.lib
-opencv_vi330d.lib
+opencv_viz330d.lib
 */
