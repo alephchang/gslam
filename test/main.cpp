@@ -4,6 +4,6 @@
 int main(int argc, char** argv)
 {
 	testSE3QuatError();
-	//run_vo(argc, argv);
-	validate_result(argc, argv);
+	run_vo(argc, argv);
+	//validate_result(argc, argv);
 }

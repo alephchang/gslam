@@ -13,3 +13,5 @@
 int run_vo(int argc, char** argv);
 int validate_result(int argc, char** argv);
 void testSE3QuatError();
+//generate the associate file corresponding to the tum data
+int generate_associate_txt(const char* dir);

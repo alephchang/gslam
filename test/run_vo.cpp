@@ -6,6 +6,8 @@
 #include <boost/lexical_cast.hpp>
 #include<boost/timer.hpp>
 #include<windows.h> //for Sleep
+#include<fstream>
+
 // -------------- test the visual odometry -------------
 
 
@@ -13,6 +15,8 @@ int run_vo ( int argc, char** argv )
 {
     if ( argc != 2 )
     {
+		for (int i = 0; i < argc; ++i)
+			cout << argv[i] << endl;
         cout<<"usage: run_vo parameter_file"<<endl;
         return 1;
     }
@@ -109,7 +113,7 @@ int run_vo ( int argc, char** argv )
         cout<<endl;
     }
 	ofstream fo(dataset_dir + "/estimatedpose.txt");
-	fo.precision(17);
+	fo.precision(15);
 	for (size_t i = 0; i < estimated_pose.size(); ++i) {
 		const SE3<double>& se3(estimated_pose[i]);
 		fo << rgb_times[i] << "\t" << se3.translation().x()<<" "
@@ -195,13 +199,13 @@ int validate_result(int argc, char** argv)
 	string dataset_dir = gslam::Config::get<string>("dataset_dir");
 	vector<pair<double, SE3<double> > > est_pose, truth_pose;
 	
-	if (load_pose_file(dataset_dir + "groundtruth.txt", truth_pose) == false
-		|| load_pose_file(dataset_dir + "estimatedpose.txt", est_pose) == false) {
+	if (load_pose_file(dataset_dir + "/groundtruth.txt", truth_pose) == false
+		|| load_pose_file(dataset_dir + "/estimatedpose.txt", est_pose) == false) {
 		return 1;
 	}
 
 
-	cout.precision(17);
+	cout.precision(4);
 
 	
 	filter_ground_truth(est_pose, truth_pose);
@@ -258,4 +262,35 @@ void testSE3QuatError()
 	Eigen::Quaterniond se3_r;
 	g2o::SE3Quat Tcw;
 	Tcw.setRotation(se3_r);
+}
+
+int generate_associate_txt(const char* dir)
+{
+	string rgbpath("rgb\\rgb.txt");	//record all the rgb file names in order
+	string depthpath("depth\\depth.txt"); //record all the depth file names in order
+	ifstream fin_rgb(dir + rgbpath);
+	ifstream fin_depth(dir + depthpath);
+	vector<string> rgb_files, depth_files;
+	string buf;
+	while(!fin_rgb.eof())
+	{	
+		fin_rgb >> buf;
+		rgb_files.push_back(buf);
+	}
+	while (!fin_depth.eof())
+	{
+		fin_depth >> buf;
+		depth_files.push_back(buf);
+	}
+	size_t len = rgb_files.size() < depth_files.size() ? rgb_files.size() : depth_files.size();
+	ofstream fou_asso(dir + string("associate.txt"));
+	for(size_t i = 0; i < len; ++i){
+		size_t pos0 = rgb_files[i].find_last_of('.');
+		size_t pos1 = depth_files[i].find_last_of('.');
+		//format£º rgb_time rgb_file_path depth_time depth_file_path
+		fou_asso << rgb_files[i].substr(0, pos0) << " rgb\\"<<rgb_files[i] << " "
+			<< depth_files[i].substr(0,pos1) <<" depth\\" << depth_files[i] << endl;
+	}
+	fou_asso.close();
+	return 0;
 }
