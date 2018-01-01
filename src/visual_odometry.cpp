@@ -22,7 +22,7 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/calib3d/calib3d.hpp>
 #include <algorithm>
-//#include <boost/timer.hpp>
+#include <boost/timer.hpp>
 
 #include "gslam/config.h"
 #include "gslam/visual_odometry.h"
@@ -48,7 +48,7 @@ VisualOdometry::VisualOdometry() :
 
 VisualOdometry::~VisualOdometry()
 {
-
+	flog_.close();
 }
 
 bool VisualOdometry::addFrame ( Frame::Ptr frame )
@@ -73,6 +73,7 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         computeDescriptors();
         featureMatching();
         poseEstimationPnP();
+		flog_<<"pnp inliers: "<<num_inliers_<<endl;
         if ( checkEstimatedPose() == true ) // a good estimation
         {
             curr_->T_c_w_ = T_c_w_estimated_;
@@ -96,31 +97,38 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
     }
     case LOST:
     {
-        cout<<"vo has lost."<<endl;
+        flog_<<"vo has lost."<<endl;
         break;
     }
     }
-
+	flog_ << "Frame id: " << curr_->id_ <<" has "<< map_->map_points_.size()<<" map points, "
+		<<"has "<< map_->keyframes_.size()<< " key frames"<< endl;
     return true;
+}
+
+bool VisualOdometry::setLogFile(const std::string& logpath)
+{
+	flog_.open(logpath, fstream::out);
+	return flog_.good();
 }
 
 void VisualOdometry::extractKeyPoints()
 {
-//    boost::timer timer;
+    boost::timer timer;
     orb_->detect ( curr_->color_, keypoints_curr_ );
-    //cout<<"extract keypoints cost time: "<<timer.elapsed() <<endl;
+    flog_<<"extract keypoints cost time: "<<timer.elapsed() <<endl;
 }
 
 void VisualOdometry::computeDescriptors()
 {
-//    boost::timer timer;
+    boost::timer timer;
     orb_->compute ( curr_->color_, keypoints_curr_, descriptors_curr_ );
-//    cout<<"descriptor computation cost time: "<<timer.elapsed() <<endl;
+    flog_<<"descriptor computation cost time: "<<timer.elapsed() <<endl;
 }
 
 void VisualOdometry::featureMatching()
 {
-//    boost::timer timer;
+    boost::timer timer;
     vector<cv::DMatch> matches;
     // select the candidates in map 
     Mat desp_map;
@@ -157,8 +165,8 @@ void VisualOdometry::featureMatching()
             match_2dkp_index_.push_back( m.trainIdx );
         }
     }
-    cout<<"good matches: "<<match_3dpts_.size() <<endl;
-//    cout<<"match cost time: "<<timer.elapsed() <<endl;
+    flog_<<"good matches: "<<match_3dpts_.size() <<endl;
+    flog_<<"match cost time: "<<timer.elapsed() <<endl;
 }
 
 void VisualOdometry::poseEstimationPnP()
@@ -184,7 +192,6 @@ void VisualOdometry::poseEstimationPnP()
     Mat rvec, tvec, inliers;
     cv::solvePnPRansac ( pts3d, pts2d, K, Mat(), rvec, tvec, false, 100, 4.0, 0.99, inliers );
     num_inliers_ = inliers.rows;
-    cout<<"pnp inliers: "<<num_inliers_<<endl;
 	cv::Mat Rot;
 	cv::Rodrigues(rvec, Rot);
 	
@@ -248,7 +255,7 @@ void VisualOdometry::poseEstimationPnP()
         pose->estimate().translation()
     );
     
-    cout<<"T_c_w_estimated_: "<<endl<<T_c_w_estimated_.matrix()<<endl;
+//    flog_<<"T_c_w_estimated_: "<<endl<<T_c_w_estimated_.matrix()<<endl;
 }
 
 bool VisualOdometry::checkEstimatedPose()
@@ -256,7 +263,7 @@ bool VisualOdometry::checkEstimatedPose()
     // check if the estimated pose is good
     if ( num_inliers_ < min_inliers_ )
     {
-        cout<<"reject because inlier is too small: "<<num_inliers_<<endl;
+        flog_<<"reject because inlier is too small: "<<num_inliers_<<endl;
         return false;
     }
     // if the motion is too large, it is probably wrong
@@ -264,7 +271,7 @@ bool VisualOdometry::checkEstimatedPose()
     Sophus::Vector6d d = T_r_c.log();
     if ( d.norm() > 5.0 )
     {
-        cout<<"reject because motion is too large: "<<d.norm() <<endl;
+        flog_<<"reject because motion is too large: "<<d.norm() <<endl;
         return false;
     }
     return true;
@@ -307,6 +314,13 @@ void VisualOdometry::addKeyFrame()
     ref_ = curr_;
 }
 
+void VisualOdometry::triangulateForNewKeyFrame()
+{
+	//1. find the latest key frame and the previous key frame
+	//2. get the matched points
+	//3. triangulatePoints
+}
+
 void VisualOdometry::addMapPoints()
 {
     // add the new map points into map
@@ -347,6 +361,8 @@ void VisualOdometry::optimizeMap()
         if ( match_ratio < map_point_erase_ratio_ )
         {
             iter = map_->map_points_.erase(iter);
+			flog_ << "erase map points because of low match ration: "<<match_ratio <<" "
+				<<map_point_erase_ratio_<< endl;
             continue;
         }
         
@@ -354,6 +370,7 @@ void VisualOdometry::optimizeMap()
         if ( angle > M_PI/6. )
         {
             iter = map_->map_points_.erase(iter);
+			flog_ << "erase map points because of large angle" << endl;
             continue;
         }
         if ( iter->second->good_ == false )
@@ -372,7 +389,6 @@ void VisualOdometry::optimizeMap()
     }
     else 
         map_point_erase_ratio_ = 0.1;
-    cout<<"map points: "<<map_->map_points_.size()<<endl;
 }
 
 double VisualOdometry::getViewAngle ( Frame::Ptr frame, MapPoint::Ptr point )

@@ -24,7 +24,7 @@
 #include "gslam/map.h"
 
 #include <opencv2/features2d/features2d.hpp>
-
+#include <fstream>
 namespace gslam 
 {
 class VisualOdometry
@@ -65,12 +65,17 @@ public:
     double key_frame_min_rot;   // minimal rotation of two key-frames
     double key_frame_min_trans; // minimal translation of two key-frames
     double  map_point_erase_ratio_; // remove map point ratio
+
+	//log file output
+	std::ofstream flog_;
     
 public: // functions 
     VisualOdometry();
     ~VisualOdometry();
     
     bool addFrame( Frame::Ptr frame );      // add a new frame 
+
+	bool setLogFile(const std::string& logpath);
     
 protected:  
     // inner operation 
@@ -81,6 +86,7 @@ protected:
     void optimizeMap();
     
     void addKeyFrame();
+	void triangulateForNewKeyFrame();
     void addMapPoints();
     bool checkEstimatedPose(); 
     bool checkKeyFrame();

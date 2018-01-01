@@ -22,7 +22,7 @@ int run_vo ( int argc, char** argv )
     }
 
     gslam::Config::setParameterFile ( argv[1] );
-    gslam::VisualOdometry::Ptr vo ( new gslam::VisualOdometry );
+    
 
 	string dataset_dir = gslam::Config::get<string>("dataset_dir");
     cout<<"dataset: "<<dataset_dir<<endl;
@@ -32,6 +32,11 @@ int run_vo ( int argc, char** argv )
         cout<<"please generate the associate file called associate.txt!"<<endl;
         return 1;
     }
+	gslam::VisualOdometry::Ptr vo(new gslam::VisualOdometry);
+	if(vo->setLogFile(dataset_dir + "/log.txt")==false){
+		cout << "Faile to create the log file: " << dataset_dir + "log.txt" << endl;
+		return 1;
+	}
 
     vector<string> rgb_files, depth_files;
     vector<double> rgb_times, depth_times;
@@ -72,6 +77,7 @@ int run_vo ( int argc, char** argv )
         if ( color.data==nullptr || depth.data==nullptr )
             break;
         gslam::Frame::Ptr pFrame = gslam::Frame::createFrame();
+		pFrame->id_ = i;
         pFrame->camera_ = camera;
         pFrame->color_ = color;
         pFrame->depth_ = depth;
@@ -250,7 +256,8 @@ int validate_result(int argc, char** argv)
 		vis.setWidgetPose("Camera", M);
 		vis.setWidgetPose("World", M_t);
 		Sleep(100);
-		cout << truth_pose[i].first - est_pose[i].first << endl;
+		cout << "Time diff: "<<truth_pose[i].first - est_pose[i].first << " Pose diff:"
+			<<(truth_pose[i].second*est_pose[i].second.inverse()).log().norm()<< endl;
 		vis.spinOnce(1, false);
 	}
 

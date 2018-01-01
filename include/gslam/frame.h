@@ -38,7 +38,7 @@ public:
     Camera::Ptr                    camera_;     // Pinhole RGBD Camera model 
     Mat                            color_, depth_; // color and depth image 
     // std::vector<cv::KeyPoint>      keypoints_;  // key points in image
-    // std::vector<MapPoint*>         map_points_; // associated map points
+    std::vector<MapPoint*>         map_points_; // associated map points
     bool                           is_key_frame_;  // whether a key-frame
     
 public: // data members 
