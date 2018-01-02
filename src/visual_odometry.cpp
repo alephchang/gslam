@@ -81,6 +81,8 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
             num_lost_ = 0;
             if ( checkKeyFrame() == true ) // is a key-frame
             {
+				//triangulate for key points in key frames
+				triangulateForNewKeyFrame();
                 addKeyFrame();
             }
         }
@@ -255,6 +257,17 @@ void VisualOdometry::poseEstimationPnP()
         pose->estimate().translation()
     );
     
+	//add map points to the current frame
+	for (int i = 0; i < inliers.rows; ++i)
+	{
+		int index = inliers.at<int>(i, 0);
+//		int map_poinit_id = match_3dpts_[index]->id_;
+//		cv::Point2f pt = pts2d[index];
+		curr_->addMapPoint2d(match_3dpts_[index]->id_, pts2d[index]);
+	}
+	curr_->sortMapPoint2d();
+	flog_ << "key point range: " << curr_->map_points_2d_.front().first
+		<< " " << curr_->map_points_2d_.back().first << endl;
 //    flog_<<"T_c_w_estimated_: "<<endl<<T_c_w_estimated_.matrix()<<endl;
 }
 
@@ -307,7 +320,9 @@ void VisualOdometry::addKeyFrame()
                 p_world, n, descriptors_curr_.row(i).clone(), curr_.get()
             );
             map_->insertMapPoint( map_point );
+			curr_->addMapPoint2d(map_point->id_, keypoints_curr_[i].pt);
         }
+		curr_->sortMapPoint2d();
     }
     
     map_->insertKeyFrame ( curr_ );
@@ -316,9 +331,70 @@ void VisualOdometry::addKeyFrame()
 
 void VisualOdometry::triangulateForNewKeyFrame()
 {
-	//1. find the latest key frame and the previous key frame
-	//2. get the matched points
-	//3. triangulatePoints
+	//1. find the matched key points between curr key frame and the previous key frame
+	const vector<Frame::KeyPoint2d>& mp2d0 = ref_->map_points_2d_;
+	const vector<Frame::KeyPoint2d>& mp2d1 = curr_->map_points_2d_;
+	size_t i = 0,  j = 0;
+	std::vector<unsigned long> map_point_idx;
+	std::vector<cv::Point2f> pts0, pts1;
+	while (i < mp2d0.size() && j < mp2d1.size()) {
+		if (mp2d0[i].first == mp2d1[j].first) {
+			pts0.push_back(ref_->camera_->pixel2camera(mp2d0[i].second));
+			pts1.push_back(curr_->camera_->pixel2camera(mp2d1[j].second));
+			map_point_idx.push_back(mp2d0[i].first);
+			i++;
+			j++;
+		}
+		else if (mp2d0[i].first < mp2d1[j].first) {
+			i++;
+		}
+		else
+			j++;
+	}
+	if (pts0.empty()) {
+		flog_ << "no key point match between current frame and ref frame";
+		return;
+	}
+	flog_ << "triangulate matche points " << pts0.size() << endl;
+	//2. triangulatePoints
+	const Sophus::SE3d& Tref = ref_->T_c_w_;
+	const Sophus::SE3d& Tcur = curr_->T_c_w_;
+	cv::Mat T0 = (cv::Mat_<float>(3, 4) <<
+		Tref.rotationMatrix()(0, 0), Tref.rotationMatrix()(0, 1), Tref.rotationMatrix()(0, 2), Tref.translation()(0),
+		Tref.rotationMatrix()(1, 0), Tref.rotationMatrix()(1, 1), Tref.rotationMatrix()(1, 2), Tref.translation()(1),
+		Tref.rotationMatrix()(2, 0), Tref.rotationMatrix()(2, 1), Tref.rotationMatrix()(2, 2), Tref.translation()(2)
+		);
+	cv::Mat T1 = (cv::Mat_<float>(3, 4) <<
+		Tcur.rotationMatrix()(0, 0), Tcur.rotationMatrix()(0, 1), Tcur.rotationMatrix()(0, 2), Tcur.translation()(0),
+		Tcur.rotationMatrix()(1, 0), Tcur.rotationMatrix()(1, 1), Tcur.rotationMatrix()(1, 2), Tcur.translation()(1),
+		Tcur.rotationMatrix()(2, 0), Tcur.rotationMatrix()(2, 1), Tcur.rotationMatrix()(2, 2), Tcur.translation()(2)
+		);
+
+	cv::Mat pts4d;
+	cv::triangulatePoints(T0, T1, pts0, pts1, pts4d);
+
+	//update the map points
+	for (i = 0; i < map_point_idx.size(); ++i)
+	{
+		Mat x = pts4d.col(i);
+		x /= x.at<float>(3, 0);
+		Eigen::Vector3d tri_pos = Eigen::Vector3d(x.at<float>(0, 0), x.at<float>(1, 0), x.at<float>(2, 0));
+		//flog_ << "triangulation error: " << (map_->map_points_[map_point_idx[i]]->pos_ - tri_pos).norm() << endl;
+		map_->map_points_[map_point_idx[i]]->pos_ = tri_pos;
+				
+	}
+	//validate
+/*	for (i = 0; i < map_point_idx.size(); ++i) {
+		Eigen::Vector3d pos = map_->map_points_[map_point_idx[i]]->pos_;
+		Eigen::Vector3d p0 = ref_->camera_->world2camera(pos, ref_->T_c_w_);
+		Eigen::Vector3d p1 = curr_->camera_->world2camera(pos, curr_->T_c_w_);
+		p0 /= p0(2, 0);
+		p1 /= p1(2, 0);
+		flog_ << "triangulation error: " << (p0 - Eigen::Vector3d(pts0[i].y, pts0[i].x, 1.0)).norm()
+			<< " " << (p1 - Eigen::Vector3d(pts1[i].y, pts1[i].x, 1.0)).norm() << endl;
+		//T0*cv::Vec3f(pos(0,0), pos(1,0), pos(2,0))
+	}
+*/	
 }
 
 void VisualOdometry::addMapPoints()
@@ -327,6 +403,7 @@ void VisualOdometry::addMapPoints()
     vector<bool> matched(keypoints_curr_.size(), false); 
     for ( int index:match_2dkp_index_ )
         matched[index] = true;
+	int add_num = 0;
     for ( int i=0; i<keypoints_curr_.size(); i++ )
     {
         if ( matched[i] == true )   
@@ -344,7 +421,9 @@ void VisualOdometry::addMapPoints()
             p_world, n, descriptors_curr_.row(i).clone(), curr_.get()
         );
         map_->insertMapPoint( map_point );
+		add_num++;
     }
+	flog_<< "new map points are added: " << add_num <<endl;
 }
 
 void VisualOdometry::optimizeMap()
@@ -361,8 +440,8 @@ void VisualOdometry::optimizeMap()
         if ( match_ratio < map_point_erase_ratio_ )
         {
             iter = map_->map_points_.erase(iter);
-			flog_ << "erase map points because of low match ration: "<<match_ratio <<" "
-				<<map_point_erase_ratio_<< endl;
+//			flog_ << "erase map points because of low match ration: "<<match_ratio <<" "
+//				<<map_point_erase_ratio_<< endl;
             continue;
         }
         

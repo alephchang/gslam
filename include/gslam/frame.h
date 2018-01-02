@@ -38,7 +38,8 @@ public:
     Camera::Ptr                    camera_;     // Pinhole RGBD Camera model 
     Mat                            color_, depth_; // color and depth image 
     // std::vector<cv::KeyPoint>      keypoints_;  // key points in image
-    std::vector<MapPoint*>         map_points_; // associated map points
+	typedef pair<unsigned long, cv::Point2f> KeyPoint2d;
+    std::vector<KeyPoint2d>        map_points_2d_; // associated map points
     bool                           is_key_frame_;  // whether a key-frame
     
 public: // data members 
@@ -58,6 +59,10 @@ public: // data members
     
     // check if a point is in this frame 
     bool isInFrame( const Vector3d& pt_world );
+
+	void addMapPoint2d(unsigned long idx, cv::Point2f pt2d);
+	void sortMapPoint2d();
+
 };
 
 }

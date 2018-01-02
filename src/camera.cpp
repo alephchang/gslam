@@ -59,6 +59,10 @@ Vector3d Camera::pixel2camera ( const Vector2d& p_p, double depth )
            );
 }
 
+cv::Point2f Camera::pixel2camera(const cv::Point2f& p_p)
+{
+	return cv::Point2f((p_p.x - cx_) / fx_, (p_p.y - cy_) / fy_);
+}
 Vector2d Camera::world2pixel ( const Vector3d& p_w, const SE3<double>& T_c_w )
 {
     return camera2pixel ( world2camera(p_w, T_c_w) );

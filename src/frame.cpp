@@ -16,7 +16,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
-//#include "stdafx.h"
 #include "gslam/frame.h"
 
 namespace gslam
@@ -92,5 +91,15 @@ bool Frame::isInFrame ( const Vector3d& pt_world )
         && pixel(0,0)<color_.cols 
         && pixel(1,0)<color_.rows;
 }
+void Frame::addMapPoint2d(unsigned long idx, cv::Point2f pt2d)
+{
+	map_points_2d_.push_back(KeyPoint2d(idx, pt2d));
+}
 
+void Frame::sortMapPoint2d()
+{
+	sort(map_points_2d_.begin(), map_points_2d_.end(), [](const KeyPoint2d &p1, const KeyPoint2d &p2) {
+		return p1.first < p2.first;
+		 });
+}
 }
