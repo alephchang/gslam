@@ -258,8 +258,6 @@ void VisualOdometry::poseEstimationPnP()
 	for (int i = 0; i < inliers.rows; ++i)
 	{
 		int index = inliers.at<int>(i, 0);
-//		int map_poinit_id = match_3dpts_[index]->id_;
-//		cv::Point2f pt = pts2d[index];
 		curr_->addMapPoint2d(match_3dpts_[index]->id_, pts2d[index]);
 	}
 	curr_->sortMapPoint2d();
@@ -377,9 +375,13 @@ void VisualOdometry::triangulateForNewKeyFrame()
 		Mat x = pts4d.col(i);
 		x /= x.at<float>(3, 0);
 		Eigen::Vector3d tri_pos = Eigen::Vector3d(x.at<float>(0, 0), x.at<float>(1, 0), x.at<float>(2, 0));
-		//flog_ << "triangulation error: " << (map_->map_points_[map_point_idx[i]]->pos_ - tri_pos).norm() << endl;
-		map_->map_points_[map_point_idx[i]]->pos_ = tri_pos;
-				
+		
+		std::unordered_map<unsigned long, MapPoint::Ptr>::iterator it = map_->map_points_.find(map_point_idx[i]);
+		if (it != map_->map_points_.end()) {
+			if ((it->second->pos_ - tri_pos).norm() < 0.1) {
+				it->second->pos_ = tri_pos;
+			}
+		}	
 	}
 	//validate
 /*	for (i = 0; i < map_point_idx.size(); ++i) {
