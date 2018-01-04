@@ -92,6 +92,8 @@ protected:
     bool checkKeyFrame();
     
     double getViewAngle( Frame::Ptr frame, MapPoint::Ptr point );
+
+	void validateProjection();
     
 };
 }

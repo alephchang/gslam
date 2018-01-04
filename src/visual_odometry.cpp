@@ -77,6 +77,7 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         if ( checkEstimatedPose() == true ) // a good estimation
         {
             curr_->T_c_w_ = T_c_w_estimated_;
+			//validateProjection(); //for validation
             optimizeMap();
             num_lost_ = 0;
             if ( checkKeyFrame() == true ) // is a key-frame
@@ -125,7 +126,7 @@ void VisualOdometry::computeDescriptors()
 {
     boost::timer timer;
     orb_->compute ( curr_->color_, keypoints_curr_, descriptors_curr_ );
-    flog_<<"descriptor computation cost time: "<<timer.elapsed() <<endl;
+    //flog_<<"descriptor computation cost time: "<<timer.elapsed() <<endl;
 }
 
 void VisualOdometry::featureMatching()
@@ -168,7 +169,7 @@ void VisualOdometry::featureMatching()
         }
     }
     flog_<<"good matches: "<<match_3dpts_.size() <<endl;
-    flog_<<"match cost time: "<<timer.elapsed() <<endl;
+    //flog_<<"match cost time: "<<timer.elapsed() <<endl;
 }
 
 void VisualOdometry::poseEstimationPnP()
@@ -191,13 +192,16 @@ void VisualOdometry::poseEstimationPnP()
               0, ref_->camera_->fy_, ref_->camera_->cy_,
               0,0,1
             );
-    Mat rvec, tvec, inliers;
-    cv::solvePnPRansac ( pts3d, pts2d, K, Mat(), rvec, tvec, false, 100, 4.0, 0.99, inliers );
+	Eigen::AngleAxisd rotvec0(curr_->T_c_w_.rotationMatrix());
+	double angle = rotvec0.angle();
+	Mat rvec = (cv::Mat_<double>(3, 1) << angle * rotvec0.axis()[0] ,
+					angle * rotvec0.axis()[1] , angle * rotvec0.axis()[2]);
+	Mat tvec = (cv::Mat_<double>(3, 1) << curr_->T_c_w_.translation()[0],
+		curr_->T_c_w_.translation()[1], curr_->T_c_w_.translation()[2]);
+    Mat inliers;
+    cv::solvePnPRansac ( pts3d, pts2d, K, Mat(), rvec, tvec, true, 100, 4.0, 0.99, inliers );
     num_inliers_ = inliers.rows;
-	cv::Mat Rot;
-	cv::Rodrigues(rvec, Rot);
-	
-//	Sophus::SO3<double> rot(rvec.at<double>(0, 0), rvec.at<double>(1, 0), rvec.at<double>(2, 0));
+
 	Eigen::Vector3d vec3(rvec.at<double>(0, 0), rvec.at<double>(1, 0), rvec.at<double>(2, 0));
 	Eigen::AngleAxisd rotvec(vec3.norm(), vec3.normalized());
 
@@ -215,14 +219,6 @@ void VisualOdometry::poseEstimationPnP()
 
     g2o::VertexSE3Expmap* pose = new g2o::VertexSE3Expmap();
     pose->setId ( 0 );
-//	Sophus::Matrix3d rot = T_c_w_estimated_.rotationMatrix();
-//	Sophus::Vector3d tran = T_c_w_estimated_.translation();
-//	Eigen::Quaterniond se3_r(T_c_w_estimated_.rotationMatrix());
-
-//	pose->setEstimate(g2o::SE3Quat(se3_r, tran));
-//    pose->setEstimate ( g2o::SE3Quat (
-//		se3_r, T_c_w_estimated_.translation()
-//    ));
 
 	Eigen::Quaterniond se3_r(T_c_w_estimated_.rotationMatrix());
 	g2o::SE3Quat Tcw;// = g2o::SE3Quat(se3_r, T_c_w_estimated_.translation());
@@ -244,6 +240,7 @@ void VisualOdometry::poseEstimationPnP()
         edge->point_ = Vector3d ( pts3d[index].x, pts3d[index].y, pts3d[index].z );
         edge->setMeasurement ( Vector2d ( pts2d[index].x, pts2d[index].y ) );
         edge->setInformation ( Eigen::Matrix2d::Identity() );
+		edge->setRobustKernel(new g2o::RobustKernelHuber());
         optimizer.addEdge ( edge );
         // set the inlier map points 
         match_3dpts_[index]->matched_times_++;
@@ -282,7 +279,8 @@ bool VisualOdometry::checkEstimatedPose()
     // if the motion is too large, it is probably wrong
     SE3<double> T_r_c = ref_->T_c_w_ * T_c_w_estimated_.inverse();
     Sophus::Vector6d d = T_r_c.log();
-    if ( d.norm() > 5.0 )
+	flog_ << "motion change " << d.norm() << endl;
+    if ( d.norm() > 3.0 )
     {
         flog_<<"reject because motion is too large: "<<d.norm() <<endl;
         return false;
@@ -352,7 +350,7 @@ void VisualOdometry::triangulateForNewKeyFrame()
 			j++;
 	}
 	if (pts0.empty()) {
-		flog_ << "no key point match between current frame and ref frame";
+		flog_ << "no key point match between current frame and ref frame" << endl;
 		return;
 	}
 	flog_ << "triangulate matche points " << pts0.size() << endl;
@@ -385,16 +383,30 @@ void VisualOdometry::triangulateForNewKeyFrame()
 	}
 	//validate
 /*	for (i = 0; i < map_point_idx.size(); ++i) {
+		if(map_->map_points_.find(map_point_idx[i])== map_->map_points_.end())
+			continue;
 		Eigen::Vector3d pos = map_->map_points_[map_point_idx[i]]->pos_;
 		Eigen::Vector3d p0 = ref_->camera_->world2camera(pos, ref_->T_c_w_);
 		Eigen::Vector3d p1 = curr_->camera_->world2camera(pos, curr_->T_c_w_);
 		p0 /= p0(2, 0);
 		p1 /= p1(2, 0);
-		flog_ << "triangulation error: " << (p0 - Eigen::Vector3d(pts0[i].y, pts0[i].x, 1.0)).norm()
-			<< " " << (p1 - Eigen::Vector3d(pts1[i].y, pts1[i].x, 1.0)).norm() << endl;
+		flog_ << "triangulation error: " << (p0 - Eigen::Vector3d(pts0[i].x, pts0[i].y, 1.0)).norm()
+			<< " " << (p1 - Eigen::Vector3d(pts1[i].x, pts1[i].y, 1.0)).norm() << endl;
 		//T0*cv::Vec3f(pos(0,0), pos(1,0), pos(2,0))
 	}
-*/	
+*/
+}
+
+void VisualOdometry::validateProjection()
+{
+	for (size_t i = 0; i < curr_->map_points_2d_.size(); ++i) {
+		Eigen::Vector3d pos = map_->map_points_[curr_->map_points_2d_[i].first]->pos_;
+		Eigen::Vector2d pix1 = curr_->camera_->world2pixel(pos, curr_->T_c_w_);
+		Eigen::Vector2d pix0(curr_->map_points_2d_[i].second.x, curr_->map_points_2d_[i].second.y);
+		if ((pix1 - pix0).norm() > 5.0)
+			flog_ << "large error for projection: " << pix1.transpose() 
+					<< " " << pix0.transpose() << endl;
+	}
 }
 
 void VisualOdometry::addMapPoints()
@@ -429,19 +441,21 @@ void VisualOdometry::addMapPoints()
 void VisualOdometry::optimizeMap()
 {
     // remove the hardly seen and no visible points 
+	size_t map_points_sz = map_->map_points_.size();
+	int outframe = 0, lowmatchratio = 0, largeangle = 0;
     for ( auto iter = map_->map_points_.begin(); iter != map_->map_points_.end(); )
     {
         if ( !curr_->isInFrame(iter->second->pos_) )
         {
             iter = map_->map_points_.erase(iter);
+			outframe++;
             continue;
         }
         float match_ratio = float(iter->second->matched_times_)/iter->second->visible_times_;
         if ( match_ratio < map_point_erase_ratio_ )
         {
             iter = map_->map_points_.erase(iter);
-//			flog_ << "erase map points because of low match ration: "<<match_ratio <<" "
-//				<<map_point_erase_ratio_<< endl;
+			lowmatchratio++;
             continue;
         }
         
@@ -449,7 +463,7 @@ void VisualOdometry::optimizeMap()
         if ( angle > M_PI/6. )
         {
             iter = map_->map_points_.erase(iter);
-			flog_ << "erase map points because of large angle" << endl;
+			largeangle++;
             continue;
         }
         if ( iter->second->good_ == false )
@@ -468,6 +482,8 @@ void VisualOdometry::optimizeMap()
     }
     else 
         map_point_erase_ratio_ = 0.1;
+	flog_ << "map points size change: " << map_points_sz << " to " << map_->map_points_.size() 
+		<< " outframe "<<outframe << " lowmatchratio "<<lowmatchratio << " largeangle " <<largeangle<< endl;
 }
 
 double VisualOdometry::getViewAngle ( Frame::Ptr frame, MapPoint::Ptr point )
