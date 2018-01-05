@@ -76,6 +76,7 @@ public: // functions
     bool addFrame( Frame::Ptr frame );      // add a new frame 
 
 	bool setLogFile(const std::string& logpath);
+	void dumpMapAndKeyFrames();
     
 protected:  
     // inner operation 
@@ -86,6 +87,7 @@ protected:
     void optimizeMap();
     
     void addKeyFrame();
+	void recordKeyFrameForMapPoint();
 	void triangulateForNewKeyFrame();
     void addMapPoints();
     bool checkEstimatedPose(); 

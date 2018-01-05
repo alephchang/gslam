@@ -323,6 +323,14 @@ void VisualOdometry::addKeyFrame()
     
     map_->insertKeyFrame ( curr_ );
     ref_ = curr_;
+	recordKeyFrameForMapPoint();
+}
+
+void VisualOdometry::recordKeyFrameForMapPoint()
+{
+	for (auto item : ref_->map_points_2d_) {
+		map_->map_points_[item.first]->observed_frames_.push_back(ref_.get());
+	}
 }
 
 void VisualOdometry::triangulateForNewKeyFrame()
@@ -410,7 +418,25 @@ void VisualOdometry::validateProjection()
 					<< " " << pix0.transpose() << endl;
 	}
 }
+void VisualOdometry::dumpMapAndKeyFrames()
+{
+	unordered_map<unsigned long, MapPoint::Ptr >::const_iterator it = map_->map_points_.begin();
+	flog_ << "== Map Information == "<< map_->map_points_.size() << endl;
 
+	for(auto it = map_->map_points_.begin(); it != map_->map_points_.end(); ++it){
+		flog_ << "Map Point ID: " << it->first << endl;
+		for (auto it_frame = it->second->observed_frames_.begin();
+					it_frame != it->second->observed_frames_.end(); ++it_frame) {
+			flog_ << (*it_frame)->id_ << " ";
+		}
+		flog_ << endl;
+	}
+	flog_ << "== Key Frames ==" << map_->keyframes_.size() << endl;
+	for (auto it_frame = map_->keyframes_.begin(); it_frame != map_->keyframes_.end(); ++it_frame) {
+		flog_ << (it_frame->second)->id_ << " ";
+	}
+	flog_ << endl;
+}
 void VisualOdometry::addMapPoints()
 {
     // add the new map points into map
