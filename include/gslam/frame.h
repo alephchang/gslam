@@ -37,9 +37,8 @@ public:
     SE3<double>                         T_c_w_;      // transform from world to camera
     Camera::Ptr                    camera_;     // Pinhole RGBD Camera model 
     Mat                            color_, depth_; // color and depth image 
-    // std::vector<cv::KeyPoint>      keypoints_;  // key points in image
-	typedef pair<unsigned long, cv::Point2f> KeyPoint2d;
-    std::vector<KeyPoint2d>        map_points_2d_; // associated map points
+	typedef std::unordered_map<unsigned long, cv::Point2f> Map_Point_2d;
+	Map_Point_2d map_points_2d_;
     bool                           is_key_frame_;  // whether a key-frame
     
 public: // data members 

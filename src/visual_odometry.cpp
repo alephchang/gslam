@@ -77,18 +77,19 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         if ( checkEstimatedPose() == true ) // a good estimation
         {
             curr_->T_c_w_ = T_c_w_estimated_;
-			//validateProjection(); //for validation
+			validateProjection(); //for validation
             optimizeMap();
             num_lost_ = 0;
             if ( checkKeyFrame() == true ) // is a key-frame
             {
 				//triangulate for key points in key frames
-				triangulateForNewKeyFrame();
+				//triangulateForNewKeyFrame();
                 addKeyFrame();
             }
         }
         else // bad estimation due to various reasons
         {
+			curr_->T_c_w_ = ref_->T_c_w_;
             num_lost_++;
             if ( num_lost_ > max_num_lost_ )
             {
@@ -106,7 +107,12 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
     }
 	flog_ << "Frame id: " << curr_->id_ <<" has "<< map_->map_points_.size()<<" map points, "
 		<<"has "<< map_->keyframes_.size()<< " key frames"<< endl;
-    return true;
+	if(map_->map_points_.empty()){
+		state_ = LOST;
+		return false;
+	}
+	else
+		return true;
 }
 
 bool VisualOdometry::setLogFile(const std::string& logpath)
@@ -187,38 +193,61 @@ void VisualOdometry::poseEstimationPnP()
         pts3d.push_back( pt->getPositionCV() );
     }
 
-    Mat K = ( cv::Mat_<double> ( 3,3 ) <<
+    Mat K = ( cv::Mat_<float> ( 3,3 ) <<
               ref_->camera_->fx_, 0, ref_->camera_->cx_,
               0, ref_->camera_->fy_, ref_->camera_->cy_,
               0,0,1
             );
 	Eigen::AngleAxisd rotvec0(curr_->T_c_w_.rotationMatrix());
-	double angle = rotvec0.angle();
-	Mat rvec = (cv::Mat_<double>(3, 1) << angle * rotvec0.axis()[0] ,
-					angle * rotvec0.axis()[1] , angle * rotvec0.axis()[2]);
-	Mat tvec = (cv::Mat_<double>(3, 1) << curr_->T_c_w_.translation()[0],
+
+	Mat rotM = (cv::Mat_<float>(3, 3) <<
+		curr_->T_c_w_.rotationMatrix()(0, 0), curr_->T_c_w_.rotationMatrix()(0, 1), curr_->T_c_w_.rotationMatrix()(0, 2),
+		curr_->T_c_w_.rotationMatrix()(1, 0), curr_->T_c_w_.rotationMatrix()(1, 1), curr_->T_c_w_.rotationMatrix()(1, 2),
+		curr_->T_c_w_.rotationMatrix()(2, 0), curr_->T_c_w_.rotationMatrix()(2, 1), curr_->T_c_w_.rotationMatrix()(2, 2));
+	Mat rvec;
+	Rodrigues(rotM, rvec);
+	Mat tvec = (cv::Mat_<float>(3, 1) << curr_->T_c_w_.translation()[0],
 		curr_->T_c_w_.translation()[1], curr_->T_c_w_.translation()[2]);
     Mat inliers;
-    cv::solvePnPRansac ( pts3d, pts2d, K, Mat(), rvec, tvec, true, 100, 4.0, 0.99, inliers );
+	cv::solvePnPRansac(pts3d, pts2d, K, Mat(), rvec, tvec, false, 100, 4.0, 0.99, inliers, cv::SOLVEPNP_EPNP);
+
     num_inliers_ = inliers.rows;
 
+	//add map points to the current frame
+	for (int i = 0; i < inliers.rows; ++i)
+	{
+		int index = inliers.at<int>(i, 0);
+		curr_->addMapPoint2d(match_3dpts_[index]->id_, pts2d[index]);
+	}
+	curr_->sortMapPoint2d();
+
+	optimizePnP(pts3d, pts2d, inliers, rvec, tvec);
+
+//	flog_ << "key point range: " << curr_->map_points_2d_.front().first
+//		<< " " << curr_->map_points_2d_.back().first << endl;
+    //flog_<<"T_c_w_estimated_ after g2o: "<<endl<<T_c_w_estimated_.matrix()<<endl;
+}
+
+void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, const Mat& inliers,
+	const Mat& rvec, const Mat& tvec)
+{
 	Eigen::Vector3d vec3(rvec.at<double>(0, 0), rvec.at<double>(1, 0), rvec.at<double>(2, 0));
 	Eigen::AngleAxisd rotvec(vec3.norm(), vec3.normalized());
 
-    T_c_w_estimated_ = SE3<double>(Sophus::Matrix3d(rotvec), 
+	T_c_w_estimated_ = SE3<double>(Sophus::Matrix3d(rotvec),
 		Sophus::Vector3d(tvec.at<double>(0, 0), tvec.at<double>(1, 0), tvec.at<double>(2, 0)));
 
-    // using bundle adjustment to optimize the pose
-    typedef g2o::BlockSolver<g2o::BlockSolverTraits<6,2>> Block;
+	// using bundle adjustment to optimize the pose
+	typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 2>> Block;
 	typedef g2o::LinearSolverDense<Block::PoseMatrixType> Linear;
 
-    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(
-						g2o::make_unique<Block>(g2o::make_unique<Linear>()));
-    g2o::SparseOptimizer optimizer;
-    optimizer.setAlgorithm ( solver );
+	g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(
+		g2o::make_unique<Block>(g2o::make_unique<Linear>()));
+	g2o::SparseOptimizer optimizer;
+	optimizer.setAlgorithm(solver);
 
-    g2o::VertexSE3Expmap* pose = new g2o::VertexSE3Expmap();
-    pose->setId ( 0 );
+	g2o::VertexSE3Expmap* pose = new g2o::VertexSE3Expmap();
+	pose->setId(0);
 
 	Eigen::Quaterniond se3_r(T_c_w_estimated_.rotationMatrix());
 	g2o::SE3Quat Tcw;// = g2o::SE3Quat(se3_r, T_c_w_estimated_.translation());
@@ -228,44 +257,34 @@ void VisualOdometry::poseEstimationPnP()
 	optimizer.addVertex(pose);
 
 
-    // edges
-    for ( int i=0; i<inliers.rows; i++ )
-    {
-        int index = inliers.at<int> ( i,0 );
-        // 3D -> 2D projection
-        EdgeProjectXYZ2UVPoseOnly* edge = new EdgeProjectXYZ2UVPoseOnly();
-        edge->setId ( i );
-        edge->setVertex ( 0, pose );
-        edge->camera_ = curr_->camera_.get();
-        edge->point_ = Vector3d ( pts3d[index].x, pts3d[index].y, pts3d[index].z );
-        edge->setMeasurement ( Vector2d ( pts2d[index].x, pts2d[index].y ) );
-        edge->setInformation ( Eigen::Matrix2d::Identity() );
-		edge->setRobustKernel(new g2o::RobustKernelHuber());
-        optimizer.addEdge ( edge );
-        // set the inlier map points 
-        match_3dpts_[index]->matched_times_++;
-    }
-
-    optimizer.initializeOptimization();
-    optimizer.optimize ( 10 );
-
-    T_c_w_estimated_ = SE3<double>(
-        pose->estimate().rotation(),
-        pose->estimate().translation()
-    );
-    
-	//add map points to the current frame
-	for (int i = 0; i < inliers.rows; ++i)
+	// edges
+	for (int i = 0; i<inliers.rows; i++)
 	{
 		int index = inliers.at<int>(i, 0);
-		curr_->addMapPoint2d(match_3dpts_[index]->id_, pts2d[index]);
+		// 3D -> 2D projection
+		EdgeProjectXYZ2UVPoseOnly* edge = new EdgeProjectXYZ2UVPoseOnly();
+		edge->setId(i);
+		edge->setVertex(0, pose);
+		edge->camera_ = curr_->camera_.get();
+		edge->point_ = Vector3d(pts3d[index].x, pts3d[index].y, pts3d[index].z);
+		edge->setMeasurement(Vector2d(pts2d[index].x, pts2d[index].y));
+		edge->setInformation(Eigen::Matrix2d::Identity());
+		//edge->setRobustKernel(new g2o::RobustKernelHuber());
+		optimizer.addEdge(edge);
+		// set the inlier map points 
+		match_3dpts_[index]->matched_times_++;
+		//flog_ << edge->point_.transpose() << " " << pts2d[index].x << " " << pts2d[index].y << endl;
 	}
-	curr_->sortMapPoint2d();
-	flog_ << "key point range: " << curr_->map_points_2d_.front().first
-		<< " " << curr_->map_points_2d_.back().first << endl;
-//    flog_<<"T_c_w_estimated_: "<<endl<<T_c_w_estimated_.matrix()<<endl;
-}
 
+	optimizer.initializeOptimization();
+	optimizer.optimize(10);
+
+	T_c_w_estimated_ = SE3<double>(
+		pose->estimate().rotation(),
+		pose->estimate().translation()
+		);
+
+}
 bool VisualOdometry::checkEstimatedPose()
 {
     // check if the estimated pose is good
@@ -329,32 +348,29 @@ void VisualOdometry::addKeyFrame()
 void VisualOdometry::recordKeyFrameForMapPoint()
 {
 	for (auto item : ref_->map_points_2d_) {
-		map_->map_points_[item.first]->observed_frames_.push_back(ref_.get());
+		auto it = map_->map_points_.find(item.first);
+		if (it!= map_->map_points_.end())
+			it->second->observed_frames_.push_back(ref_.get());
 	}
 }
 
 void VisualOdometry::triangulateForNewKeyFrame()
 {
 	//1. find the matched key points between curr key frame and the previous key frame
-	const vector<Frame::KeyPoint2d>& mp2d0 = ref_->map_points_2d_;
-	const vector<Frame::KeyPoint2d>& mp2d1 = curr_->map_points_2d_;
+	const Frame::Map_Point_2d& mp2d0 = ref_->map_points_2d_;
+	const Frame::Map_Point_2d& mp2d1 = curr_->map_points_2d_;
 	size_t i = 0,  j = 0;
 	std::vector<unsigned long> map_point_idx;
 	std::vector<cv::Point2f> pts0, pts1;
-	while (i < mp2d0.size() && j < mp2d1.size()) {
-		if (mp2d0[i].first == mp2d1[j].first) {
-			pts0.push_back(ref_->camera_->pixel2camera(mp2d0[i].second));
-			pts1.push_back(curr_->camera_->pixel2camera(mp2d1[j].second));
-			map_point_idx.push_back(mp2d0[i].first);
-			i++;
-			j++;
+	for(auto it0 = mp2d0.begin(); it0 != mp2d0.end(); ++it0){
+		auto it1 = mp2d1.find(it0->first);
+		if(it1 != mp2d1.end()){
+			pts0.push_back(ref_->camera_->pixel2camera(it0->second));
+			pts1.push_back(curr_->camera_->pixel2camera(it1->second));
+			map_point_idx.push_back(it0->first);
 		}
-		else if (mp2d0[i].first < mp2d1[j].first) {
-			i++;
-		}
-		else
-			j++;
 	}
+
 	if (pts0.empty()) {
 		flog_ << "no key point match between current frame and ref frame" << endl;
 		return;
@@ -386,7 +402,7 @@ void VisualOdometry::triangulateForNewKeyFrame()
 		
 		std::unordered_map<unsigned long, MapPoint::Ptr>::iterator it = map_->map_points_.find(map_point_idx[i]);
 		if (it != map_->map_points_.end()) {
-			if ((it->second->pos_ - tri_pos).norm() < 0.1) {
+			if ((it->second->pos_ - tri_pos).norm() < 0.1 && false) {
 				it->second->pos_ = tri_pos;
 			}
 		}	
@@ -409,13 +425,13 @@ void VisualOdometry::triangulateForNewKeyFrame()
 
 void VisualOdometry::validateProjection()
 {
-	for (size_t i = 0; i < curr_->map_points_2d_.size(); ++i) {
-		Eigen::Vector3d pos = map_->map_points_[curr_->map_points_2d_[i].first]->pos_;
+	for(auto it = curr_->map_points_2d_.begin(); it != curr_->map_points_2d_.end(); ++it){
+		Eigen::Vector3d pos = map_->map_points_[it->first]->pos_;
 		Eigen::Vector2d pix1 = curr_->camera_->world2pixel(pos, curr_->T_c_w_);
-		Eigen::Vector2d pix0(curr_->map_points_2d_[i].second.x, curr_->map_points_2d_[i].second.y);
+		Eigen::Vector2d pix0(it->second.x, it->second.y);
 		if ((pix1 - pix0).norm() > 5.0)
-			flog_ << "large error for projection: " << pix1.transpose() 
-					<< " " << pix0.transpose() << endl;
+			flog_ << "large error for projection: " << pix1.transpose()
+			<< " " << pix0.transpose() << endl;
 	}
 }
 void VisualOdometry::dumpMapAndKeyFrames()
@@ -424,7 +440,8 @@ void VisualOdometry::dumpMapAndKeyFrames()
 	flog_ << "== Map Information == "<< map_->map_points_.size() << endl;
 
 	for(auto it = map_->map_points_.begin(); it != map_->map_points_.end(); ++it){
-		flog_ << "Map Point ID: " << it->first << endl;
+		if (it->second->observed_frames_.size() < 2) continue;
+		flog_ << "Map Point ID: " << it->first <<" oberved times: "<< it->second->observed_frames_.size() << endl;
 		for (auto it_frame = it->second->observed_frames_.begin();
 					it_frame != it->second->observed_frames_.end(); ++it_frame) {
 			flog_ << (*it_frame)->id_ << " ";

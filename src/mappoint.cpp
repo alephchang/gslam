@@ -32,7 +32,6 @@ MapPoint::MapPoint()
 MapPoint::MapPoint ( long unsigned int id, const Vector3d& position, const Vector3d& norm, Frame* frame, const Mat& descriptor )
 : id_(id), pos_(position), norm_(norm), good_(true), visible_times_(1), matched_times_(1), descriptor_(descriptor)
 {
-    observed_frames_.push_back(frame);
 }
 
 MapPoint::Ptr MapPoint::createMapPoint()
