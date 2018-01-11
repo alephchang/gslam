@@ -89,6 +89,7 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         }
         else // bad estimation due to various reasons
         {
+			//reInitializeFrame();
 			curr_->T_c_w_ = ref_->T_c_w_;
             num_lost_++;
             if ( num_lost_ > max_num_lost_ )
@@ -109,6 +110,7 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
 		<<"has "<< map_->keyframes_.size()<< " key frames"<< endl;
 	if(map_->map_points_.empty()){
 		state_ = LOST;
+		flog_ << "tracking lost because of empty map at frame " << curr_->id_ << endl;
 		return false;
 	}
 	else
@@ -325,6 +327,33 @@ bool VisualOdometry::checkKeyFrame()
         return true;
     return false;
 }
+void VisualOdometry::reInitializeFrame()
+{
+	curr_->T_c_w_ = T_c_w_estimated_;
+	ref_ = curr_;
+	map_->map_points_.clear();
+	for (size_t i = 0; i<keypoints_curr_.size(); i++)
+	{
+		double d = curr_->findDepth(keypoints_curr_[i]);
+		if (d < 0)
+			continue;
+		Vector3d p_world = ref_->camera_->pixel2world(
+			Vector2d(keypoints_curr_[i].pt.x, keypoints_curr_[i].pt.y), curr_->T_c_w_, d
+		);
+		Vector3d n = p_world - ref_->getCamCenter();
+		n.normalize();
+		MapPoint::Ptr map_point = MapPoint::createMapPoint(
+			p_world, n, descriptors_curr_.row(i).clone(), curr_.get()
+		);
+		map_->insertMapPoint(map_point);
+		curr_->addMapPoint2d(map_point->id_, keypoints_curr_[i].pt);
+	}
+	curr_->sortMapPoint2d();
+	key_frame_ids_.push_back(curr_->id_);
+	map_->insertKeyFrame(curr_);
+	recordKeyFrameForMapPoint();
+	flog_ << "re init frame " << endl;
+}
 
 void VisualOdometry::addKeyFrame()
 {
@@ -537,7 +566,7 @@ void VisualOdometry::optimizeMap()
         iter++;
     }
     
-    if ( match_2dkp_index_.size()<100 )
+    if ( match_2dkp_index_.size()<100 || num_inliers_*2 < match_2dkp_index_.size())
         addMapPoints();
     if ( map_->map_points_.size() > 1000 )  
     {
