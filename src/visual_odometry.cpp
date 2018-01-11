@@ -27,7 +27,7 @@
 #include "gslam/config.h"
 #include "gslam/visual_odometry.h"
 #include "gslam/g2o_types.h"
-
+#include "gslam/Optimizer.h"
 namespace gslam
 {
 
@@ -209,26 +209,28 @@ void VisualOdometry::poseEstimationPnP()
 	Mat tvec = (cv::Mat_<float>(3, 1) << curr_->T_c_w_.translation()[0],
 		curr_->T_c_w_.translation()[1], curr_->T_c_w_.translation()[2]);
     Mat inliers;
-	cv::solvePnPRansac(pts3d, pts2d, K, Mat(), rvec, tvec, false, 100, 4.0, 0.99, inliers, cv::SOLVEPNP_EPNP);
+	cv::solvePnPRansac(pts3d, pts2d, K, Mat(), rvec, tvec, false, 100, 4.0, 0.99, inliers, cv::SOLVEPNP_ITERATIVE);
 
-    num_inliers_ = inliers.rows;
+	num_inliers_ = 0;// inliers.rows;
+
+	optimizePnP(pts3d, pts2d, inliers, rvec, tvec);
 
 	//add map points to the current frame
 	for (int i = 0; i < inliers.rows; ++i)
 	{
 		int index = inliers.at<int>(i, 0);
-		curr_->addMapPoint2d(match_3dpts_[index]->id_, pts2d[index]);
+		if (index > 0) {
+			curr_->addMapPoint2d(match_3dpts_[index]->id_, pts2d[index]);
+			num_inliers_++;
+		}
 	}
 	curr_->sortMapPoint2d();
-
-	optimizePnP(pts3d, pts2d, inliers, rvec, tvec);
-
 //	flog_ << "key point range: " << curr_->map_points_2d_.front().first
 //		<< " " << curr_->map_points_2d_.back().first << endl;
     //flog_<<"T_c_w_estimated_ after g2o: "<<endl<<T_c_w_estimated_.matrix()<<endl;
 }
 
-void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, const Mat& inliers,
+void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, Mat& inliers,
 	const Mat& rvec, const Mat& tvec)
 {
 	Eigen::Vector3d vec3(rvec.at<double>(0, 0), rvec.at<double>(1, 0), rvec.at<double>(2, 0));
@@ -269,7 +271,7 @@ void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<
 		edge->point_ = Vector3d(pts3d[index].x, pts3d[index].y, pts3d[index].z);
 		edge->setMeasurement(Vector2d(pts2d[index].x, pts2d[index].y));
 		edge->setInformation(Eigen::Matrix2d::Identity());
-		//edge->setRobustKernel(new g2o::RobustKernelHuber());
+		edge->setRobustKernel(new g2o::RobustKernelHuber());
 		optimizer.addEdge(edge);
 		// set the inlier map points 
 		match_3dpts_[index]->matched_times_++;
@@ -278,7 +280,15 @@ void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<
 
 	optimizer.initializeOptimization();
 	optimizer.optimize(10);
-
+	auto edges = optimizer.edges();
+	for (auto it = edges.begin(); it != edges.end(); ++it) {
+		if (inliers.rows> 50 && dynamic_cast<EdgeProjectXYZ2UVPoseOnly*>(*it)->error().norm() > 4.0) {
+			inliers.at<int>((*it)->id(), 0) = -1;
+			flog_ << "point id: " << (*it)->vertex(0)->id() << " camera id: " << curr_->id_
+				<< " pixel locatoin: " << dynamic_cast<EdgeProjectXYZ2UVPoseOnly*>(*it)->measurement().transpose()
+				<< " error: " << dynamic_cast<EdgeProjectXYZ2UVPoseOnly*>(*it)->error().transpose() << std::endl;
+		}
+	}
 	T_c_w_estimated_ = SE3<double>(
 		pose->estimate().rotation(),
 		pose->estimate().translation()
@@ -339,10 +349,19 @@ void VisualOdometry::addKeyFrame()
         }
 		curr_->sortMapPoint2d();
     }
-    
+	key_frame_ids_.push_back(curr_->id_);
     map_->insertKeyFrame ( curr_ );
     ref_ = curr_;
 	recordKeyFrameForMapPoint();
+	if (key_frame_ids_.size() > 1) {
+		vector<unsigned long> frame_ids;
+		if (key_frame_ids_.size() == 2)
+			frame_ids = key_frame_ids_;
+		else
+			frame_ids.assign(key_frame_ids_.begin() + key_frame_ids_.size() - 3, key_frame_ids_.end());
+		Optimizer::localBA(frame_ids, map_);
+	}
+	
 }
 
 void VisualOdometry::recordKeyFrameForMapPoint()

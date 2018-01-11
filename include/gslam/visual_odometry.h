@@ -42,7 +42,7 @@ public:
     
     Frame::Ptr  ref_;       // reference key-frame 
     Frame::Ptr  curr_;      // current frame 
-    
+	vector<unsigned long> key_frame_ids_;
     cv::Ptr<cv::ORB> orb_;  // orb detector and computer 
     vector<cv::KeyPoint>    keypoints_curr_;    // keypoints in current frame
     Mat                     descriptors_curr_;  // descriptor in current frame 
@@ -96,7 +96,7 @@ protected:
     double getViewAngle( Frame::Ptr frame, MapPoint::Ptr point );
 
 	void validateProjection();
-	void optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, const Mat& inliers,
+	void optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, Mat& inliers,
 		const Mat& rvec, const Mat& tvec);
     
 };
