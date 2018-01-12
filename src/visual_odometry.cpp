@@ -53,6 +53,7 @@ VisualOdometry::~VisualOdometry()
 
 bool VisualOdometry::addFrame ( Frame::Ptr frame )
 {
+	flog_ << "Frame ID: " << frame->id_ << std::endl;
     switch ( state_ )
     {
     case INITIALIZING:
@@ -73,7 +74,8 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         computeDescriptors();
         featureMatching();
         poseEstimationPnP();
-		flog_<<"pnp inliers: "<<num_inliers_<<endl;
+		flog_<<"pnp inliers: "<<num_inliers_
+			 << " good matches: " << match_3dpts_.size() << endl;
         if ( checkEstimatedPose() == true ) // a good estimation
         {
             curr_->T_c_w_ = T_c_w_estimated_;
@@ -96,6 +98,8 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
             {
                 state_ = LOST;
             }
+			flog_ << "==========There are " << map_->map_points_.size() << " map points, "
+				<< "and " << map_->keyframes_.size() << " key frames" << endl;
             return false;
         }
         break;
@@ -106,8 +110,8 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         break;
     }
     }
-	flog_ << "Frame id: " << curr_->id_ <<" has "<< map_->map_points_.size()<<" map points, "
-		<<"has "<< map_->keyframes_.size()<< " key frames"<< endl;
+	flog_ << "==========There are "<< map_->map_points_.size()<<" map points, "
+		<<"and "<< map_->keyframes_.size()<< " key frames"<< endl;
 	if(map_->map_points_.empty()){
 		state_ = LOST;
 		flog_ << "tracking lost because of empty map at frame " << curr_->id_ << endl;
@@ -176,7 +180,7 @@ void VisualOdometry::featureMatching()
             match_2dkp_index_.push_back( m.trainIdx );
         }
     }
-    flog_<<"good matches: "<<match_3dpts_.size() <<endl;
+
     //flog_<<"match cost time: "<<timer.elapsed() <<endl;
 }
 
@@ -211,7 +215,7 @@ void VisualOdometry::poseEstimationPnP()
 	Mat tvec = (cv::Mat_<float>(3, 1) << curr_->T_c_w_.translation()[0],
 		curr_->T_c_w_.translation()[1], curr_->T_c_w_.translation()[2]);
     Mat inliers;
-	cv::solvePnPRansac(pts3d, pts2d, K, Mat(), rvec, tvec, false, 100, 4.0, 0.99, inliers, cv::SOLVEPNP_ITERATIVE);
+	cv::solvePnPRansac(pts3d, pts2d, K, Mat(), rvec, tvec, true, 100, 4.0, 0.99, inliers, cv::SOLVEPNP_ITERATIVE);
 
 	num_inliers_ = 0;// inliers.rows;
 
@@ -566,8 +570,11 @@ void VisualOdometry::optimizeMap()
         iter++;
     }
     
-    if ( match_2dkp_index_.size()<100 || num_inliers_*2 < match_2dkp_index_.size())
-        addMapPoints();
+	if (match_2dkp_index_.size() < 100 || num_inliers_ * 2 < match_2dkp_index_.size()) {
+		addMapPoints();
+		if (match_2dkp_index_.size() > 100 && num_inliers_ * 2 < match_2dkp_index_.size())
+			flog_ << "add map points because of low inliers ratio" << endl;
+	}
     if ( map_->map_points_.size() > 1000 )  
     {
         // TODO map is too large, remove some one 

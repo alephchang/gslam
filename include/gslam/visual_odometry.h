@@ -98,6 +98,7 @@ protected:
 	void validateProjection();
 	void optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, Mat& inliers,
 		const Mat& rvec, const Mat& tvec);
+	void reInitializeFrame();
     
 };
 }
