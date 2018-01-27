@@ -7,6 +7,7 @@ add_library( gslam SHARED
     g2o_types.cpp
     visual_odometry.cpp
     Optimizer.cpp
+    ORBextractor.cc
 )
 
 target_link_libraries( gslam

@@ -5,7 +5,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
 #include<boost/timer.hpp>
-#include<windows.h> //for Sleep
+//#include<windows.h> //for Sleep
 #include<fstream>
 
 // -------------- test the visual odometry -------------
@@ -77,7 +77,7 @@ int run_vo ( int argc, char** argv )
         if ( color.data==nullptr || depth.data==nullptr )
             break;
         gslam::Frame::Ptr pFrame = gslam::Frame::createFrame();
-		pFrame->id_ = i;
+        pFrame->id_ = i;
         pFrame->camera_ = camera;
         pFrame->color_ = color;
         pFrame->depth_ = depth;
@@ -90,7 +90,7 @@ int run_vo ( int argc, char** argv )
         if ( vo->state_ == gslam::VisualOdometry::LOST )
             break;
         Sophus::SE3<double> Twc = pFrame->T_c_w_.inverse();
-		estimated_pose.push_back(pFrame->T_c_w_);
+        estimated_pose.push_back(pFrame->T_c_w_);
         // show the map and the camera pose
         cv::Affine3d M (
             cv::Affine3d::Mat3 (
@@ -102,7 +102,6 @@ int run_vo ( int argc, char** argv )
                 Twc.translation() ( 0,0 ), Twc.translation() ( 1,0 ), Twc.translation() ( 2,0 )
             )
         );
-
         Mat img_show = color.clone();
         for ( auto& pt:vo->map_->map_points_ )
         {
@@ -115,22 +114,22 @@ int run_vo ( int argc, char** argv )
         cv::waitKey ( 1 );
         vis.setWidgetPose ( "Camera", M );
         vis.spinOnce ( 1, false );
-		
+        
         cout<<endl;
     }
-	ofstream fo(dataset_dir + "/estimatedpose.txt");
-	fo.precision(15);
-	for (size_t i = 0; i < estimated_pose.size(); ++i) {
-		const SE3<double>& se3(estimated_pose[i]);
-		fo << rgb_times[i] << "\t" << se3.translation().x()<<" "
-			<< se3.translation().y() << " "
-			<< se3.translation().z() << " "
-			<< se3.unit_quaternion().x()<< " " 
-			<< se3.unit_quaternion().y() << " " 
-			<< se3.unit_quaternion().z() << " " 
-			<< se3.unit_quaternion().w() << endl;
-	}
-	fo.close();
+    ofstream fo(dataset_dir + "/estimatedpose.txt");
+    fo.precision(15);
+    for (size_t i = 0; i < estimated_pose.size(); ++i) {
+        const SE3<double>& se3(estimated_pose[i]);
+        fo << rgb_times[i] << "\t" << se3.translation().x()<<" "
+            << se3.translation().y() << " "
+            << se3.translation().z() << " "
+            << se3.unit_quaternion().x()<< " " 
+            << se3.unit_quaternion().y() << " " 
+            << se3.unit_quaternion().z() << " " 
+            << se3.unit_quaternion().w() << endl;
+    }
+    fo.close();
     return 0;
 }
 
@@ -168,38 +167,37 @@ bool load_pose_file(const string& path, vector<pair<double, SE3<double> > >& pos
 ///we assume that truth_pose has higher frequence than est_pose
 ///and for each item in est_pose, pick the first larger one in truth_pose.
 void filter_ground_truth(const vector<pair<double, SE3<double> > >&est_pose,
-	vector<pair<double, SE3<double> > >& truth_pose)
+        vector<pair<double, SE3<double> > >& truth_pose)
 {
-	vector<int> truth_idx;
-	if (est_pose.empty() || truth_pose.empty() || est_pose[0].first > truth_pose.back().first) {
-		truth_pose.clear();
-		return;
-	}
-	int j = 0;
-	for(size_t i = 0; i < est_pose.size(); ++i){
-		double current = est_pose[i].first;
-		while(j!=truth_pose.size()){
-			if(current < truth_pose[j].first){
-				truth_idx.push_back(j);
-				break;
-			}
-			j++;
-		}
-	}
-	for(size_t i = 0; i < truth_idx.size(); ++i){
-		truth_pose[i] = truth_pose[truth_idx[i]];
-	}
-	truth_pose.resize(truth_idx.size());
+    vector<int> truth_idx;
+    if (est_pose.empty() || truth_pose.empty() || est_pose[0].first > truth_pose.back().first) {
+        truth_pose.clear();
+        return;
+    }
+    int j = 0;
+    for(size_t i = 0; i < est_pose.size(); ++i){
+        double current = est_pose[i].first;
+        while(j!=truth_pose.size()){
+            if(current < truth_pose[j].first){
+                truth_idx.push_back(j);
+                break;
+            }
+            j++;
+        }
+    }
+    for(size_t i = 0; i < truth_idx.size(); ++i){
+        truth_pose[i] = truth_pose[truth_idx[i]];
+    }
+    truth_pose.resize(truth_idx.size());
 }
 
 int validate_result(int argc, char** argv)
 {
-	//load estimatedpose.txt and groundtruth.txt and compare
-	if (argc != 2)
-	{
-		cout << "usage: run_vo parameter_file" << endl;
-		return 1;
-	}
+    //load estimatedpose.txt and groundtruth.txt and compare
+    if (argc != 2){
+        cout << "usage: run_vo parameter_file" << endl;
+        return 1;
+    }
 
 	gslam::Config::setParameterFile(argv[1]);
 	string dataset_dir = gslam::Config::get<string>("dataset_dir");
@@ -255,7 +253,7 @@ int validate_result(int argc, char** argv)
 		);
 		vis.setWidgetPose("Camera", M);
 		vis.setWidgetPose("World", M_t);
-		Sleep(100);
+		//Sleep(100);
 		cout << "Time diff: "<<truth_pose[i].first - est_pose[i].first << " Pose diff:"
 			<<(truth_pose[i].second*est_pose[i].second.inverse()).log().norm()<< endl;
 		vis.spinOnce(1, false);

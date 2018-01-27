@@ -1,2 +1,5 @@
 add_executable( run_vo main.cpp run_vo.cpp )
 target_link_libraries( run_vo gslam )
+add_executable( run_orb test_orb.cpp)
+target_link_libraries( run_orb gslam )
+target_link_libraries( run_orb /usr/local/lib/libopencv_xfeatures2d.so)
