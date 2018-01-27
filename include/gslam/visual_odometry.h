@@ -22,6 +22,7 @@
 
 #include "gslam/common_include.h"
 #include "gslam/map.h"
+#include "ORBextractor.h"
 
 #include <opencv2/features2d/features2d.hpp>
 #include <fstream>
@@ -43,7 +44,7 @@ public:
     Frame::Ptr  ref_;       // reference key-frame 
     Frame::Ptr  curr_;      // current frame 
 	vector<unsigned long> key_frame_ids_;
-    cv::Ptr<cv::ORB> orb_;  // orb detector and computer 
+    cv::Ptr<ORB_SLAM2::ORBextractor> orb_;  // orb detector and computer 
     vector<cv::KeyPoint>    keypoints_curr_;    // keypoints in current frame
     Mat                     descriptors_curr_;  // descriptor in current frame 
     
@@ -80,25 +81,24 @@ public: // functions
     
 protected:  
     // inner operation 
-    void extractKeyPoints();
-    void computeDescriptors(); 
+    void detectAndMatchFeatures();
     void featureMatching();
     void poseEstimationPnP(); 
     void optimizeMap();
     
     void addKeyFrame();
-	void recordKeyFrameForMapPoint();
-	void triangulateForNewKeyFrame();
+    void recordKeyFrameForMapPoint();
+    void triangulateForNewKeyFrame();
     void addMapPoints();
     bool checkEstimatedPose(); 
     bool checkKeyFrame();
     
     double getViewAngle( Frame::Ptr frame, MapPoint::Ptr point );
 
-	void validateProjection();
-	void optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, Mat& inliers,
-		const Mat& rvec, const Mat& tvec);
-	void reInitializeFrame();
+    void validateProjection();
+    void optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, Mat& inliers,
+            const Mat& rvec, const Mat& tvec);
+    void reInitializeFrame();
     
 };
 }

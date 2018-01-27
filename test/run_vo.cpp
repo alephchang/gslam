@@ -1,11 +1,9 @@
 #include"run_vo.h"
 
 #include "gslam/g2o_types.h"
-
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
 #include<boost/timer.hpp>
-//#include<windows.h> //for Sleep
 #include<fstream>
 
 // -------------- test the visual odometry -------------
@@ -44,11 +42,12 @@ int run_vo ( int argc, char** argv )
     {
         string rgb_time, rgb_file, depth_time, depth_file;
         fin>>rgb_time>>rgb_file>>depth_time>>depth_file;
+        if(rgb_file.empty()) break;
         rgb_times.push_back ( atof ( rgb_time.c_str() ) );
         depth_times.push_back ( atof ( depth_time.c_str() ) );
         rgb_files.push_back ( dataset_dir+"/"+rgb_file );
         depth_files.push_back ( dataset_dir+"/"+depth_file );
-
+        cout << "rgb_file: "<<rgb_file <<endl;
         if ( fin.good() == false )
             break;
     }
@@ -66,20 +65,22 @@ int run_vo ( int argc, char** argv )
     camera_coor.setRenderingProperty ( cv::viz::LINE_WIDTH, 1.0 );
     vis.showWidget ( "World", world_coor );
     vis.showWidget ( "Camera", camera_coor );
-	
+    
     cout<<"read total "<<rgb_files.size() <<" entries"<<endl;
-	vector<SE3<double> > estimated_pose;
+    vector<SE3<double> > estimated_pose;
+    Mat gray;
     for ( int i=0; i<rgb_files.size(); i++ )
     {
         cout<<"****** loop "<<i<<" ******"<<endl;
         Mat color = cv::imread ( rgb_files[i] );
+        cvtColor(color, gray, CV_RGB2GRAY);
         Mat depth = cv::imread ( depth_files[i], -1 );
         if ( color.data==nullptr || depth.data==nullptr )
             break;
         gslam::Frame::Ptr pFrame = gslam::Frame::createFrame();
         pFrame->id_ = i;
         pFrame->camera_ = camera;
-        pFrame->color_ = color;
+        pFrame->color_ = gray;
         pFrame->depth_ = depth;
         pFrame->time_stamp_ = rgb_times[i];
 

@@ -43,7 +43,7 @@ VisualOdometry::VisualOdometry() :
     key_frame_min_rot   = Config::get<double> ( "keyframe_rotation" );
     key_frame_min_trans = Config::get<double> ( "keyframe_translation" );
     map_point_erase_ratio_ = Config::get<double> ( "map_point_erase_ratio" );
-    orb_ = cv::ORB::create ( num_of_features_, scale_factor_, level_pyramid_ );
+    orb_ = new ORB_SLAM2::ORBextractor(1000,1.2,8,20,7);
 }
 
 VisualOdometry::~VisualOdometry()
@@ -61,8 +61,7 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         state_ = OK;
         curr_ = ref_ = frame;
         // extract features from first frame and add them into map
-        extractKeyPoints();
-        computeDescriptors();
+        detectAndMatchFeatures();
         addKeyFrame();      // the first frame is a key-frame
         break;
     }
@@ -70,8 +69,7 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
     {
         curr_ = frame;
         curr_->T_c_w_ = ref_->T_c_w_;
-        extractKeyPoints();
-        computeDescriptors();
+        detectAndMatchFeatures();
         featureMatching();
         poseEstimationPnP();
         flog_<<"pnp inliers: "<<num_inliers_
@@ -127,18 +125,10 @@ bool VisualOdometry::setLogFile(const std::string& logpath)
     return flog_.good();
 }
 
-void VisualOdometry::extractKeyPoints()
+void VisualOdometry::detectAndMatchFeatures()
 {
-    boost::timer timer;
-    orb_->detect ( curr_->color_, keypoints_curr_ );
-    flog_<<"extract keypoints cost time: "<<timer.elapsed() <<endl;
-}
-
-void VisualOdometry::computeDescriptors()
-{
-    boost::timer timer;
-    orb_->compute ( curr_->color_, keypoints_curr_, descriptors_curr_ );
-    //flog_<<"descriptor computation cost time: "<<timer.elapsed() <<endl;
+    (*orb_)(curr_->color_, cv::Mat(), keypoints_curr_, descriptors_curr_);
+    //descriptors_curr_.convertTo(descriptors_curr_, CV_32F);
 }
 
 void VisualOdometry::featureMatching()
@@ -160,7 +150,6 @@ void VisualOdometry::featureMatching()
             desp_map.push_back( p->descriptor_ );
         }
     }
-    
     matcher_flann_.match ( desp_map, descriptors_curr_, matches );
     // select the best matches
     float min_dis = std::min_element (
