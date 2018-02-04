@@ -22,24 +22,34 @@
 
 #include "gslam/common_include.h"
 #include "gslam/camera.h"
+#include "gslam/ORBVocabulary.h"
+#include "gslam/mappoint.h"
+#include "3rdparty/DBoW2/DBoW2/BowVector.h"
+#include "3rdparty/DBoW2/DBoW2/FeatureVector.h"
 
 namespace gslam 
 {
     
 // forward declare 
-class MapPoint;
 class Frame
 {
 public:
     typedef std::shared_ptr<Frame> Ptr;
     unsigned long                  id_;         // id of this frame
     double                         time_stamp_; // when it is recorded
-    SE3<double>                         T_c_w_;      // transform from world to camera
+    SE3<double>                    T_c_w_;      // transform from world to camera
     Camera::Ptr                    camera_;     // Pinhole RGBD Camera model 
     Mat                            color_, depth_; // color and depth image 
-	typedef std::unordered_map<unsigned long, cv::Point2f> Map_Point_2d;
-	Map_Point_2d map_points_2d_;
+    typedef std::unordered_map<unsigned long, cv::Point2f> Map_Point_2d;
+    Map_Point_2d map_points_2d_;
     bool                           is_key_frame_;  // whether a key-frame
+    std::vector<MapPoint::Ptr>     vpMapPoints_;  // MapPoints associated to keypoints, NULL pointer if no association.
+    std::vector<cv::KeyPoint>      vKeys_;
+    cv::Mat                        descriptors_;
+    // Bag of Words Vector structures.
+    DBoW2::BowVector               BowVec_;
+    DBoW2::FeatureVector           featVec_;
+    static shared_ptr<ORBVocabulary>  pORBvocab_;
     
 public: // data members 
     Frame();
@@ -59,9 +69,9 @@ public: // data members
     // check if a point is in this frame 
     bool isInFrame( const Vector3d& pt_world );
 
-	void addMapPoint2d(unsigned long idx, cv::Point2f pt2d);
-	void sortMapPoint2d();
-
+    void addMapPoint2d(unsigned long idx, cv::Point2f pt2d);
+    void sortMapPoint2d();
+    void computeBoW();
 };
 
 }

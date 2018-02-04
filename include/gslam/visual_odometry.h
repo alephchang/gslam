@@ -45,8 +45,8 @@ public:
     Frame::Ptr  curr_;      // current frame 
 	vector<unsigned long> key_frame_ids_;
     cv::Ptr<ORB_SLAM2::ORBextractor> orb_;  // orb detector and computer 
-    vector<cv::KeyPoint>    keypoints_curr_;    // keypoints in current frame
-    Mat                     descriptors_curr_;  // descriptor in current frame 
+    //vector<cv::KeyPoint>    keypoints_curr_;    // keypoints in current frame
+    //Mat                     descriptors_curr_;  // descriptor in current frame 
     
     cv::FlannBasedMatcher   matcher_flann_;     // flann matcher
     vector<MapPoint::Ptr>   match_3dpts_;       // matched 3d points 
@@ -81,9 +81,11 @@ public: // functions
     
 protected:  
     // inner operation 
-    void detectAndMatchFeatures();
+    void detectAndComputeFeatures();
     void featureMatching();
+    void featureMatchingWithRef();
     void poseEstimationPnP(); 
+    void trackLocalMap(); //based on the pose estimation, find more match between map and keypoints;
     void optimizeMap();
     
     void addKeyFrame();

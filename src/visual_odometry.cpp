@@ -28,9 +28,13 @@
 #include "gslam/visual_odometry.h"
 #include "gslam/g2o_types.h"
 #include "gslam/Optimizer.h"
+#include "gslam/ORBmatcher.h"
 namespace gslam
 {
 
+const int TH_HIGH = 100;
+const int TH_LOW = 50;
+const int HISTO_LENGTH = 30;
 VisualOdometry::VisualOdometry() :
     state_ ( INITIALIZING ), ref_ ( nullptr ), curr_ ( nullptr ), map_ ( new Map ), num_lost_ ( 0 ), num_inliers_ ( 0 ), matcher_flann_ ( new cv::flann::LshIndexParams ( 5,10,2 ) )
 {
@@ -61,7 +65,7 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         state_ = OK;
         curr_ = ref_ = frame;
         // extract features from first frame and add them into map
-        detectAndMatchFeatures();
+        detectAndComputeFeatures();
         addKeyFrame();      // the first frame is a key-frame
         break;
     }
@@ -69,8 +73,9 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
     {
         curr_ = frame;
         curr_->T_c_w_ = ref_->T_c_w_;
-        detectAndMatchFeatures();
-        featureMatching();
+        detectAndComputeFeatures();
+        //featureMatching();
+        featureMatchingWithRef();
         poseEstimationPnP();
         flog_<<"pnp inliers: "<<num_inliers_
              << " good matches: " << match_3dpts_.size() << endl;
@@ -125,9 +130,10 @@ bool VisualOdometry::setLogFile(const std::string& logpath)
     return flog_.good();
 }
 
-void VisualOdometry::detectAndMatchFeatures()
+void VisualOdometry::detectAndComputeFeatures()
 {
-    (*orb_)(curr_->color_, cv::Mat(), keypoints_curr_, descriptors_curr_);
+    (*orb_)(curr_->color_, cv::Mat(), curr_->vKeys_, curr_->descriptors_);
+    curr_->vpMapPoints_.assign(curr_->vKeys_.size(), nullptr);
     //descriptors_curr_.convertTo(descriptors_curr_, CV_32F);
 }
 
@@ -150,7 +156,7 @@ void VisualOdometry::featureMatching()
             desp_map.push_back( p->descriptor_ );
         }
     }
-    matcher_flann_.match ( desp_map, descriptors_curr_, matches );
+    matcher_flann_.match ( desp_map, curr_->descriptors_, matches );
     // select the best matches
     float min_dis = std::min_element (
                         matches.begin(), matches.end(),
@@ -161,16 +167,35 @@ void VisualOdometry::featureMatching()
 
     match_3dpts_.clear();
     match_2dkp_index_.clear();
+    flog_ << "match with matcher_flann_: " <<std::endl;
     for ( cv::DMatch& m : matches )
     {
         if ( m.distance < max<float> ( min_dis*match_ratio_, 30.0 ) )
         {
             match_3dpts_.push_back( candidate[m.queryIdx] );
             match_2dkp_index_.push_back( m.trainIdx );
+            flog_ << match_3dpts_.back()->id_ << " " << match_2dkp_index_.back() << std::endl;
         }
     }
+    flog_ << "end of match with matcher_flann_ " <<std::endl;
 
     //flog_<<"match cost time: "<<timer.elapsed() <<endl;
+}
+void VisualOdometry::featureMatchingWithRef()
+{
+    ORBmatcher matcher(0.6,true);
+    vector<MapPoint::Ptr> vpMapPointMatches;
+    matcher.searchByBoW(ref_, curr_, vpMapPointMatches);
+    //TODO fill match_3dpts_ and match_2dkp_index_;
+    //flog_ << "match with ORBmatcher :" <<std::endl;
+    for(size_t i = 0; i < vpMapPointMatches.size(); ++i){
+        if(vpMapPointMatches[i]!=nullptr){
+            match_3dpts_.push_back(vpMapPointMatches[i]);
+            match_2dkp_index_.push_back(i);
+           //flog_ << vpMapPointMatches[i]->id_ << " " << i << std::endl;
+        }
+    }
+    //flog_ << "end of match with ORBmatcher " <<std::endl;
 }
 
 void VisualOdometry::poseEstimationPnP()
@@ -181,7 +206,7 @@ void VisualOdometry::poseEstimationPnP()
 
     for ( int index:match_2dkp_index_ )
     {
-        pts2d.push_back ( keypoints_curr_[index].pt );
+        pts2d.push_back ( curr_->vKeys_[index].pt );
     }
     for ( MapPoint::Ptr pt:match_3dpts_ )
     {
@@ -216,6 +241,7 @@ void VisualOdometry::poseEstimationPnP()
         int index = inliers.at<int>(i, 0);
         if (index > 0) {
             curr_->addMapPoint2d(match_3dpts_[index]->id_, pts2d[index]);
+            curr_->vpMapPoints_[match_2dkp_index_[index]] = match_3dpts_[index];
             num_inliers_++;
         }
     }
@@ -325,21 +351,22 @@ void VisualOdometry::reInitializeFrame()
     curr_->T_c_w_ = T_c_w_estimated_;
     ref_ = curr_;
     map_->map_points_.clear();
-    for (size_t i = 0; i<keypoints_curr_.size(); i++)
+    for (size_t i = 0; i<curr_->vKeys_.size(); i++)
     {
-        double d = curr_->findDepth(keypoints_curr_[i]);
+        double d = curr_->findDepth(curr_->vKeys_[i]);
         if (d < 0)
             continue;
         Vector3d p_world = ref_->camera_->pixel2world(
-            Vector2d(keypoints_curr_[i].pt.x, keypoints_curr_[i].pt.y), curr_->T_c_w_, d
+            Vector2d(curr_->vKeys_[i].pt.x, curr_->vKeys_[i].pt.y), curr_->T_c_w_, d
         );
         Vector3d n = p_world - ref_->getCamCenter();
         n.normalize();
         MapPoint::Ptr map_point = MapPoint::createMapPoint(
-            p_world, n, descriptors_curr_.row(i).clone(), curr_.get()
+            p_world, n, curr_->descriptors_.row(i).clone(), curr_.get()
         );
         map_->insertMapPoint(map_point);
-        curr_->addMapPoint2d(map_point->id_, keypoints_curr_[i].pt);
+        curr_->addMapPoint2d(map_point->id_, curr_->vKeys_[i].pt);
+        curr_->vpMapPoints_[i] = map_point;
     }
     curr_->sortMapPoint2d();
     key_frame_ids_.push_back(curr_->id_);
@@ -353,27 +380,29 @@ void VisualOdometry::addKeyFrame()
     if ( map_->keyframes_.empty() )
     {
         // first key-frame, add all 3d points into map
-        for ( size_t i=0; i<keypoints_curr_.size(); i++ )
+        for ( size_t i=0; i<curr_->vKeys_.size(); i++ )
         {
-            double d = curr_->findDepth ( keypoints_curr_[i] );
+            double d = curr_->findDepth ( curr_->vKeys_[i] );
             if ( d < 0 ) 
                 continue;
             Vector3d p_world = ref_->camera_->pixel2world (
-                Vector2d ( keypoints_curr_[i].pt.x, keypoints_curr_[i].pt.y ), curr_->T_c_w_, d
+                Vector2d ( curr_->vKeys_[i].pt.x, curr_->vKeys_[i].pt.y ), curr_->T_c_w_, d
             );
             Vector3d n = p_world - ref_->getCamCenter();
             n.normalize();
             MapPoint::Ptr map_point = MapPoint::createMapPoint(
-                p_world, n, descriptors_curr_.row(i).clone(), curr_.get()
+                p_world, n, curr_->descriptors_.row(i).clone(), curr_.get()
             );
             map_->insertMapPoint( map_point );
-            curr_->addMapPoint2d(map_point->id_, keypoints_curr_[i].pt);
+            curr_->addMapPoint2d(map_point->id_, curr_->vKeys_[i].pt);
+            curr_->vpMapPoints_[i] = map_point;
         }
         curr_->sortMapPoint2d();
     }
     key_frame_ids_.push_back(curr_->id_);
     map_->insertKeyFrame ( curr_ );
     ref_ = curr_;
+    curr_->computeBoW();
     recordKeyFrameForMapPoint();
     if (key_frame_ids_.size() > 1) {
         vector<unsigned long> frame_ids;
@@ -498,27 +527,28 @@ void VisualOdometry::dumpMapAndKeyFrames()
 void VisualOdometry::addMapPoints()
 {
     // add the new map points into map
-    vector<bool> matched(keypoints_curr_.size(), false); 
+    vector<bool> matched(curr_->vKeys_.size(), false); 
     for ( int index:match_2dkp_index_ )
         matched[index] = true;
     int add_num = 0;
-    for ( int i=0; i<keypoints_curr_.size(); i++ )
+    for ( int i=0; i<curr_->vKeys_.size(); i++ )
     {
         if ( matched[i] == true )   
             continue;
-        double d = ref_->findDepth ( keypoints_curr_[i] );
+        double d = ref_->findDepth ( curr_->vKeys_[i] );
         if ( d<0 )  
             continue;
         Vector3d p_world = ref_->camera_->pixel2world (
-            Vector2d ( keypoints_curr_[i].pt.x, keypoints_curr_[i].pt.y ), 
+            Vector2d ( curr_->vKeys_[i].pt.x, curr_->vKeys_[i].pt.y ), 
             curr_->T_c_w_, d
         );
         Vector3d n = p_world - ref_->getCamCenter();
         n.normalize();
         MapPoint::Ptr map_point = MapPoint::createMapPoint(
-            p_world, n, descriptors_curr_.row(i).clone(), curr_.get()
+            p_world, n, curr_->descriptors_.row(i).clone(), curr_.get()
         );
         map_->insertMapPoint( map_point );
+        curr_->vpMapPoints_[i] = map_point;
         add_num++;
     }
     flog_<< "new map points are added: " << add_num <<endl;

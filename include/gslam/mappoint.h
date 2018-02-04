@@ -61,6 +61,9 @@ public:
         const Vector3d& norm_,
         const Mat& descriptor,
         Frame* frame );
+    inline bool isBad(){
+        return !good_;
+    }
 };
 }
 

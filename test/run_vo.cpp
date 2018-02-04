@@ -13,8 +13,8 @@ int run_vo ( int argc, char** argv )
 {
     if ( argc != 2 )
     {
-		for (int i = 0; i < argc; ++i)
-			cout << argv[i] << endl;
+        for (int i = 0; i < argc; ++i)
+        cout << argv[i] << endl;
         cout<<"usage: run_vo parameter_file"<<endl;
         return 1;
     }
@@ -22,7 +22,7 @@ int run_vo ( int argc, char** argv )
     gslam::Config::setParameterFile ( argv[1] );
     
 
-	string dataset_dir = gslam::Config::get<string>("dataset_dir");
+    string dataset_dir = gslam::Config::get<string>("dataset_dir");
     cout<<"dataset: "<<dataset_dir<<endl;
     ifstream fin ( dataset_dir+"/associate.txt" );
     if ( !fin )
@@ -30,11 +30,12 @@ int run_vo ( int argc, char** argv )
         cout<<"please generate the associate file called associate.txt!"<<endl;
         return 1;
     }
-	gslam::VisualOdometry::Ptr vo(new gslam::VisualOdometry);
-	if(vo->setLogFile(dataset_dir + "/log.txt")==false){
-		cout << "Faile to create the log file: " << dataset_dir + "log.txt" << endl;
-		return 1;
-	}
+    
+    gslam::VisualOdometry::Ptr vo(new gslam::VisualOdometry);
+    if(vo->setLogFile(dataset_dir + "/log.txt")==false){
+        cout << "Faile to create the log file: " << dataset_dir + "log.txt" << endl;
+        return 1;
+    }
 
     vector<string> rgb_files, depth_files;
     vector<double> rgb_times, depth_times;
@@ -52,6 +53,19 @@ int run_vo ( int argc, char** argv )
             break;
     }
 
+    //Load ORB Vocabulary
+    string orbVocabDir= gslam::Config::get<string>("orb_vocab_dir");
+    cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
+
+    gslam::Frame::pORBvocab_ = std::make_shared<gslam::ORBVocabulary>();
+    bool bVocLoad = gslam::Frame::pORBvocab_->loadFromTextFile(orbVocabDir);
+    if(!bVocLoad)
+    {
+        cerr << "Wrong path to vocabulary. " << endl;
+        cerr << "Falied to open at: " << orbVocabDir << endl;
+        exit(-1);
+    }
+    cout << "Vocabulary loaded!" << endl << endl;
     gslam::Camera::Ptr camera ( new gslam::Camera );
 
     // visualization

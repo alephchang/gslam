@@ -20,6 +20,7 @@
 
 namespace gslam
 {
+shared_ptr<ORBVocabulary>  Frame::pORBvocab_=nullptr;
 Frame::Frame()
 : id_(-1), time_stamp_(-1), camera_(nullptr), is_key_frame_(false)
 {
@@ -101,4 +102,23 @@ void Frame::sortMapPoint2d()
 		return p1.first < p2.first;
 		 });*/
 }
+
+std::vector<cv::Mat> toDescriptorVector(const cv::Mat &Descriptors)
+{
+    std::vector<cv::Mat> vDesc;
+    vDesc.reserve(Descriptors.rows);
+    for (int j=0;j<Descriptors.rows;j++)
+        vDesc.push_back(Descriptors.row(j));
+
+    return vDesc;
 }
+
+void Frame::computeBoW()
+{
+    if(BowVec_.empty())
+    {
+        vector<cv::Mat> vCurrentDesc = toDescriptorVector(descriptors_);
+        pORBvocab_->transform(vCurrentDesc,BowVec_,featVec_,4);
+    }
+}
+}//namespace

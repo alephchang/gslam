@@ -13,21 +13,23 @@ set( LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib )
 #message("PROJECT_SOURCE_DIR: " ${PROJECT_SOURCE_DIR})
 ############### dependencies ######################
 # Eigen
-include_directories( "/usr/include/eigen3" )
+find_package(Eigen3 REQUIRED)
+
 # OpenCV
 find_package( OpenCV 3.1 REQUIRED )
+find_package(G2O REQUIRED)
 include_directories( ${OpenCV_INCLUDE_DIRS} )
-#message("Opencv_libs: " ${OpenCV_LIBS})
+
 # Sophus 
-#find_package( Sophus REQUIRED )
-set(Sophus_INCLUDE_DIRS "/work/3rdparty/Sophus")
-include_directories( ${Sophus_INCLUDE_DIRS} )
-#message("Sophus_LIBRARIES", ${Sophus_LIBRARIES})
+find_package(Sophus REQUIRED)
+
 set( THIRD_PARTY_LIBS 
     ${OpenCV_LIBS}
     g2o_core g2o_stuff g2o_types_sba
+    ${PROJECT_SOURCE_DIR}/3rdparty/DBoW2/lib/libDBoW2.so
 )
 ############### dependencies ######################
-include_directories( ${PROJECT_SOURCE_DIR}/include )
+include_directories( ${PROJECT_SOURCE_DIR}/include 
+                        ${PROJECT_SOURCE_DIR})
 add_subdirectory( src )
 add_subdirectory( test )
