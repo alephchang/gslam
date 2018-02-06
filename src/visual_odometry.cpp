@@ -183,11 +183,12 @@ void VisualOdometry::featureMatching()
 }
 void VisualOdometry::featureMatchingWithRef()
 {
-    ORBmatcher matcher(0.6,true);
+    ORBmatcher matcher(0.8,true);
     vector<MapPoint::Ptr> vpMapPointMatches;
     matcher.searchByBoW(ref_, curr_, vpMapPointMatches);
-    //TODO fill match_3dpts_ and match_2dkp_index_;
     //flog_ << "match with ORBmatcher :" <<std::endl;
+    match_3dpts_.clear();
+    match_2dkp_index_.clear();
     for(size_t i = 0; i < vpMapPointMatches.size(); ++i){
         if(vpMapPointMatches[i]!=nullptr){
             match_3dpts_.push_back(vpMapPointMatches[i]);
@@ -496,6 +497,7 @@ void VisualOdometry::triangulateForNewKeyFrame()
 void VisualOdometry::validateProjection()
 {
     for(auto it = curr_->map_points_2d_.begin(); it != curr_->map_points_2d_.end(); ++it){
+        if(map_->map_points_.find(it->first) == map_->map_points_.end()) continue;
         Eigen::Vector3d pos = map_->map_points_[it->first]->pos_;
         Eigen::Vector2d pix1 = curr_->camera_->world2pixel(pos, curr_->T_c_w_);
         Eigen::Vector2d pix0(it->second.x, it->second.y);
