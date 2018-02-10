@@ -1,5 +1,7 @@
 #include "gslam/Optimizer.h"
 #include "gslam/g2o_types.h"
+#include "gslam/frame.h"
+#include "gslam/Converter.h"
 #include<fstream>
 
 namespace gslam {
@@ -148,4 +150,159 @@ namespace gslam {
             map_points[i - frames.size()]->pos_ = vPoint;
         }
     }
+    
+int Optimizer::poseOptimization(Frame::Ptr pFrame)
+{
+    g2o::SparseOptimizer optimizer;
+    typedef g2o::BlockSolver< g2o::BlockSolverTraits<6, 3> > BlockSolver_6_3;
+    typedef g2o::LinearSolverDense<BlockSolver_6_3::PoseMatrixType> Linear;
+    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(
+            g2o::make_unique<BlockSolver_6_3>(g2o::make_unique<Linear>()));
+//    BlockSolver_6_3::LinearSolverType * linearSolver;
+//    linearSolver = new g2o::LinearSolverDense<BlockSolver_6_3::PoseMatrixType>();
+//    BlockSolver_6_3 * solver_ptr = new BlockSolver_6_3(linearSolver);
+//    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    optimizer.setAlgorithm(solver);
+
+    int nInitialCorrespondences=0;
+
+    // Set Frame vertex
+    g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
+    //vSE3->setEstimate(Converter::toSE3Quat(pFrame->T_c_w_));
+    Eigen::Quaterniond se3_r(pFrame->T_c_w_.rotationMatrix());
+    g2o::SE3Quat Tcw = g2o::SE3Quat(se3_r, pFrame->T_c_w_.translation());
+    vSE3->setEstimate(Tcw);
+    vSE3->setId(0);
+    vSE3->setFixed(false);
+    optimizer.addVertex(vSE3);
+
+    // Set MapPoint vertices
+    const int N = pFrame->N_;
+
+    vector<g2o::EdgeSE3ProjectXYZOnlyPose*> vpEdgesMono;
+    vector<size_t> vnIndexEdgeMono;
+    vpEdgesMono.reserve(N);
+    vnIndexEdgeMono.reserve(N);
+
+    const float deltaMono = sqrt(5.991);
+
+    for(int i=0; i<N; i++)
+    {
+        MapPoint::Ptr pMP = pFrame->vpMapPoints_[i];
+        if(pMP!=nullptr)
+        {
+            nInitialCorrespondences++;
+            pFrame->vbOutlier_[i] = false;
+
+            Eigen::Matrix<double,2,1> obs;
+            const cv::KeyPoint &kpUn = pFrame->vKeys_[i];
+            obs << kpUn.pt.x, kpUn.pt.y;
+
+            g2o::EdgeSE3ProjectXYZOnlyPose* e = new g2o::EdgeSE3ProjectXYZOnlyPose();
+
+            e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
+            e->setMeasurement(obs);
+            const float invSigma2 = pFrame->vInvLevelSigma2_[kpUn.octave];
+            e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
+
+            g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+            e->setRobustKernel(rk);
+            rk->setDelta(deltaMono);
+
+            e->fx = pFrame->camera_->fx_;
+            e->fy = pFrame->camera_->fy_;
+            e->cx = pFrame->camera_->cx_;
+            e->cy = pFrame->camera_->cy_;
+            cv::Point3f Xw = pMP->getPositionCV();
+            e->Xw[0] = Xw.x;
+            e->Xw[1] = Xw.y;
+            e->Xw[2] = Xw.z;
+
+            optimizer.addEdge(e);
+
+            vpEdgesMono.push_back(e);
+            vnIndexEdgeMono.push_back(i);
+        }
+    }
+    std::ofstream fou;
+    logPath = "/work/data/fr1xyz";
+    if (!logPath.empty()) {
+        std::string path = logPath + "/opt_" + std::to_string(optId) + ".txt";
+        fou.open(path.c_str(), std::ios::out);
+    }
+    if(fou.good()){
+        g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
+        fou << "vSE3: " << vSE3_recov->estimate() <<endl;
+        auto edges = optimizer.edges();
+        for (auto it = edges.begin(); it != edges.end(); ++it) {
+            g2o::EdgeSE3ProjectXYZOnlyPose* itc = dynamic_cast<g2o::EdgeSE3ProjectXYZOnlyPose*>(*it);
+            fou << itc->measurement().transpose() << " -> "
+                << itc->Xw.transpose() << " error: "
+                << itc->error().transpose() << endl;
+        }
+        fou.close();
+    }
+
+    if(nInitialCorrespondences<3)
+        return 0;
+
+    // We perform 4 optimizations, after each optimization we classify observation as inlier/outlier
+    // At the next optimization, outliers are not included, but at the end they can be classified as inliers again.
+    const float chi2Mono[4]={5.991,5.991,5.991,5.991};
+    const float chi2Stereo[4]={7.815,7.815,7.815, 7.815};
+    const int its[4]={10,10,10,10};    
+
+    int nBad=0;
+    for(size_t it=0; it<4; it++)
+    {
+        vSE3->setEstimate(Converter::toSE3Quat(pFrame->T_c_w_));
+        optimizer.initializeOptimization(0);
+        optimizer.setVerbose(true);
+        optimizer.optimize(its[it]);
+
+        nBad=0;
+        for(size_t i=0, iend=vpEdgesMono.size(); i<iend; i++)
+        {
+            g2o::EdgeSE3ProjectXYZOnlyPose* e = vpEdgesMono[i];
+
+            const size_t idx = vnIndexEdgeMono[i];
+
+            if(pFrame->vbOutlier_[idx])
+            {
+                e->computeError();
+            }
+
+            const float chi2 = e->chi2();
+
+            if(chi2>chi2Mono[it])
+            {                
+                pFrame->vbOutlier_[idx]=true;
+                e->setLevel(1);
+                nBad++;
+            }
+            else
+            {
+                pFrame->vbOutlier_[idx]=false;
+                e->setLevel(0);
+            }
+
+            if(it==2)
+                e->setRobustKernel(0);
+        }
+
+        if(optimizer.edges().size()<10)
+            break;
+    }    
+
+    // Recover optimized pose and return number of inliers
+    g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
+    Tcw = vSE3_recov->estimate();
+    pFrame->T_c_w_ = Sophus::SE3d(Tcw.rotation(), Tcw.translation());
+    for(size_t i = 0; i < pFrame->N_; ++i){
+        if(!pFrame->vbOutlier_[i]){
+            pFrame->addMapPoint2d(pFrame->vpMapPoints_[i]->id_, pFrame->vKeys_[i].pt);
+        }
+    }
+    return nInitialCorrespondences-nBad;
+}
 }

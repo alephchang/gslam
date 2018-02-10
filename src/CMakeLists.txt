@@ -9,6 +9,7 @@ add_library( gslam SHARED
     Optimizer.cpp
     ORBextractor.cc
     ORBmatcher.cpp
+    Converter.cpp
 )
 
 target_link_libraries( gslam

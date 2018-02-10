@@ -93,14 +93,7 @@ bool Frame::isInFrame ( const Vector3d& pt_world )
 }
 void Frame::addMapPoint2d(unsigned long idx, cv::Point2f pt2d)
 {
-	map_points_2d_.insert(std::pair<unsigned long, cv::Point2f>(idx, pt2d));
-}
-
-void Frame::sortMapPoint2d()
-{
-/*	sort(map_points_2d_.begin(), map_points_2d_.end(), [](const KeyPoint2d &p1, const KeyPoint2d &p2) {
-		return p1.first < p2.first;
-		 });*/
+    map_points_2d_.insert(std::pair<unsigned long, cv::Point2f>(idx, pt2d));
 }
 
 std::vector<cv::Mat> toDescriptorVector(const cv::Mat &Descriptors)

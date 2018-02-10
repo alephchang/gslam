@@ -75,10 +75,10 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         curr_->T_c_w_ = ref_->T_c_w_;
         detectAndComputeFeatures();
         //featureMatching();
-        featureMatchingWithRef();
-        poseEstimationPnP();
-        flog_<<"pnp inliers: "<<num_inliers_
-             << " good matches: " << match_3dpts_.size() << endl;
+        int nmatches = featureMatchingWithRef();
+        //poseEstimationPnP();
+        int ngoodmatches = poseEstimationOptimization();
+        flog_ << "inliers: " << ngoodmatches << "of matches: " << nmatches <<endl;
         if ( checkEstimatedPose() == true ) // a good estimation
         {
             curr_->T_c_w_ = T_c_w_estimated_;
@@ -134,6 +134,9 @@ void VisualOdometry::detectAndComputeFeatures()
 {
     (*orb_)(curr_->color_, cv::Mat(), curr_->vKeys_, curr_->descriptors_);
     curr_->vpMapPoints_.assign(curr_->vKeys_.size(), nullptr);
+    curr_->vbOutlier_.assign(curr_->vKeys_.size(), true);
+    curr_->N_ = curr_->vpMapPoints_.size();
+    curr_->vInvLevelSigma2_ = orb_->GetInverseScaleSigmaSquares();
     //descriptors_curr_.convertTo(descriptors_curr_, CV_32F);
 }
 
@@ -181,11 +184,11 @@ void VisualOdometry::featureMatching()
 
     //flog_<<"match cost time: "<<timer.elapsed() <<endl;
 }
-void VisualOdometry::featureMatchingWithRef()
+int VisualOdometry::featureMatchingWithRef()
 {
     ORBmatcher matcher(0.8,true);
     vector<MapPoint::Ptr> vpMapPointMatches;
-    matcher.searchByBoW(ref_, curr_, vpMapPointMatches);
+    int nmatch = matcher.searchByBoW(ref_, curr_, vpMapPointMatches);
     //flog_ << "match with ORBmatcher :" <<std::endl;
     match_3dpts_.clear();
     match_2dkp_index_.clear();
@@ -196,7 +199,9 @@ void VisualOdometry::featureMatchingWithRef()
            //flog_ << vpMapPointMatches[i]->id_ << " " << i << std::endl;
         }
     }
+    curr_->vpMapPoints_ = vpMapPointMatches;
     //flog_ << "end of match with ORBmatcher " <<std::endl;
+    return nmatch;
 }
 
 void VisualOdometry::poseEstimationPnP()
@@ -205,7 +210,7 @@ void VisualOdometry::poseEstimationPnP()
     vector<cv::Point3f> pts3d;
     vector<cv::Point2f> pts2d;
 
-    for ( int index:match_2dkp_index_ )
+/*    for ( int index:match_2dkp_index_ )
     {
         pts2d.push_back ( curr_->vKeys_[index].pt );
     }
@@ -213,7 +218,13 @@ void VisualOdometry::poseEstimationPnP()
     {
         pts3d.push_back( pt->getPositionCV() );
     }
-
+*/
+    for(size_t i = 0; i < curr_->N_; ++i){
+        if(curr_->vpMapPoints_[i]!=nullptr){
+            pts2d.push_back(curr_->vKeys_[i].pt);
+            pts3d.push_back(curr_->vpMapPoints_[i]->getPositionCV());
+        }
+    }
     Mat K = ( cv::Mat_<float> ( 3,3 ) <<
               ref_->camera_->fx_, 0, ref_->camera_->cx_,
               0, ref_->camera_->fy_, ref_->camera_->cy_,
@@ -237,6 +248,7 @@ void VisualOdometry::poseEstimationPnP()
     optimizePnP(pts3d, pts2d, inliers, rvec, tvec);
 
     //add map points to the current frame
+    curr_->vpMapPoints_.assign(curr_->N_, nullptr);//zero all the map points, and only record the inliers
     for (int i = 0; i < inliers.rows; ++i)
     {
         int index = inliers.at<int>(i, 0);
@@ -246,10 +258,36 @@ void VisualOdometry::poseEstimationPnP()
             num_inliers_++;
         }
     }
-    curr_->sortMapPoint2d();
 //    flog_ << "key point range: " << curr_->map_points_2d_.front().first
 //        << " " << curr_->map_points_2d_.back().first << endl;
     //flog_<<"T_c_w_estimated_ after g2o: "<<endl<<T_c_w_estimated_.matrix()<<endl;
+    flog_<<"pnp inliers: "<<num_inliers_
+             << " good matches: " << match_3dpts_.size() << endl;
+}
+
+int VisualOdometry::poseEstimationOptimization()
+{
+    num_inliers_ = Optimizer::poseOptimization(curr_);
+    // Discard outliers
+    int nmatches = 0;
+    for(int i =0; i<curr_->N_; i++)
+    {
+        if(curr_->vpMapPoints_[i])
+        {
+            if(curr_->vbOutlier_[i])
+            {
+                MapPoint::Ptr pMP = curr_->vpMapPoints_[i];
+
+                curr_->vpMapPoints_[i]=nullptr;
+                curr_->vbOutlier_[i]=false;
+                //nmatches--;
+            }
+            else{
+                nmatches++;
+            }
+        }
+    }
+    return nmatches;
 }
 
 void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, Mat& inliers,
@@ -369,7 +407,6 @@ void VisualOdometry::reInitializeFrame()
         curr_->addMapPoint2d(map_point->id_, curr_->vKeys_[i].pt);
         curr_->vpMapPoints_[i] = map_point;
     }
-    curr_->sortMapPoint2d();
     key_frame_ids_.push_back(curr_->id_);
     map_->insertKeyFrame(curr_);
     recordKeyFrameForMapPoint();
@@ -398,7 +435,6 @@ void VisualOdometry::addKeyFrame()
             curr_->addMapPoint2d(map_point->id_, curr_->vKeys_[i].pt);
             curr_->vpMapPoints_[i] = map_point;
         }
-        curr_->sortMapPoint2d();
     }
     key_frame_ids_.push_back(curr_->id_);
     map_->insertKeyFrame ( curr_ );

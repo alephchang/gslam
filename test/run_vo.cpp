@@ -129,7 +129,8 @@ int run_vo ( int argc, char** argv )
         cv::waitKey ( 1 );
         vis.setWidgetPose ( "Camera", M );
         vis.spinOnce ( 1, false );
-        
+        //string str = dataset_dir + "/" + std::to_string(i)+".png";
+        //cv::imwrite(str, img_show);
         cout<<endl;
     }
     ofstream fo(dataset_dir + "/estimatedpose.txt");

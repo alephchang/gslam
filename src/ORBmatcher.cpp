@@ -136,6 +136,7 @@ int ORBmatcher::searchByBoW(Frame::Ptr pKF,Frame::Ptr F, vector<MapPoint::Ptr> &
             Fit = F->featVec_.lower_bound(KFit->first);
         }
     }
+    return nmatches;
 }   
     
 }
