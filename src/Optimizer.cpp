@@ -1,7 +1,8 @@
 #include "gslam/Optimizer.h"
 #include "gslam/g2o_types.h"
 #include "gslam/frame.h"
-#include "gslam/Converter.h"
+#include "gslam/Converter.h" 
+#include"Eigen/Dense"
 #include<fstream>
 
 namespace gslam {
@@ -224,24 +225,6 @@ int Optimizer::poseOptimization(Frame::Ptr pFrame)
             vnIndexEdgeMono.push_back(i);
         }
     }
-    std::ofstream fou;
-    logPath = "/work/data/fr1xyz";
-    if (!logPath.empty()) {
-        std::string path = logPath + "/opt_" + std::to_string(optId) + ".txt";
-        fou.open(path.c_str(), std::ios::out);
-    }
-    if(fou.good()){
-        g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
-        fou << "vSE3: " << vSE3_recov->estimate() <<endl;
-        auto edges = optimizer.edges();
-        for (auto it = edges.begin(); it != edges.end(); ++it) {
-            g2o::EdgeSE3ProjectXYZOnlyPose* itc = dynamic_cast<g2o::EdgeSE3ProjectXYZOnlyPose*>(*it);
-            fou << itc->measurement().transpose() << " -> "
-                << itc->Xw.transpose() << " error: "
-                << itc->error().transpose() << endl;
-        }
-        fou.close();
-    }
 
     if(nInitialCorrespondences<3)
         return 0;
@@ -303,6 +286,35 @@ int Optimizer::poseOptimization(Frame::Ptr pFrame)
             pFrame->addMapPoint2d(pFrame->vpMapPoints_[i]->id_, pFrame->vKeys_[i].pt);
         }
     }
+    
+#ifdef VO_DEBUG    
+    std::ofstream fou;
+    logPath = "/work/data/fr1xyz";
+    if (!logPath.empty()) {
+        std::string path = logPath + "/opt_" + std::to_string(optId) + ".txt";
+        fou.open(path.c_str(), std::ios::out);
+    }
+
+    if(fou.good()){
+        g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
+        fou << "vSE3: " << vSE3_recov->estimate() <<endl;
+        auto edges = optimizer.edges();
+        for (auto it = edges.begin(); it != edges.end(); ++it) {
+            g2o::EdgeSE3ProjectXYZOnlyPose* itc = dynamic_cast<g2o::EdgeSE3ProjectXYZOnlyPose*>(*it);
+            itc->computeError();
+            Eigen::Matrix3d K;
+            K << itc->fx, 0.0, itc->cx, 0.0, itc->fy, itc->cy, 0.0, 0.0, 1.0;
+            Eigen::Vector3d pt3(itc->Xw[0], itc->Xw[1], itc->Xw[2]);
+            pt3 = K * vSE3_recov->estimate()* pt3;
+            Eigen::Vector2d projerr(itc->measurement()[0]-pt3[0]/pt3[2], itc->measurement()[1]-pt3[1]/pt3[2]); 
+            fou << itc->measurement().transpose() << " -> "
+                << itc->Xw.transpose() << " edge error: "
+                << itc->error().transpose() << " proj error: " << projerr.transpose() << endl;
+            
+        }
+        fou.close();
+    }
+#endif    
     return nInitialCorrespondences-nBad;
 }
 }

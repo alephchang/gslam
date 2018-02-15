@@ -52,7 +52,7 @@ public:
     vector<MapPoint::Ptr>   match_3dpts_;       // matched 3d points 
     vector<int>             match_2dkp_index_;  // matched 2d pixels (index of kp_curr)
    
-    SE3<double> T_c_w_estimated_;    // the estimated pose of current frame 
+    //SE3<double> T_c_w_estimated_;    // the estimated pose of current frame 
     int num_inliers_;        // number of inlier features in icp
     int num_lost_;           // number of lost times
     
@@ -83,8 +83,9 @@ protected:
     // inner operation 
     void detectAndComputeFeatures();
     void featureMatching();
-    void featureMatchingWithRef();
+    int featureMatchingWithRef();
     void poseEstimationPnP(); 
+    int poseEstimationOptimization();
     void trackLocalMap(); //based on the pose estimation, find more match between map and keypoints;
     void optimizeMap();
     

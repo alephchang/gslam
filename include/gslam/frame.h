@@ -50,6 +50,10 @@ public:
     DBoW2::BowVector               BowVec_;
     DBoW2::FeatureVector           featVec_;
     static shared_ptr<ORBVocabulary>  pORBvocab_;
+    vector<bool>                   vbOutlier_;
+    int                            N_;
+    vector<float>                  vInvLevelSigma2_;
+    
     
 public: // data members 
     Frame();

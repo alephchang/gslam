@@ -78,10 +78,10 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         int nmatches = featureMatchingWithRef();
         //poseEstimationPnP();
         int ngoodmatches = poseEstimationOptimization();
+        
         flog_ << "inliers: " << ngoodmatches << "of matches: " << nmatches <<endl;
         if ( checkEstimatedPose() == true ) // a good estimation
         {
-            curr_->T_c_w_ = T_c_w_estimated_;
             validateProjection(); //for validation
             optimizeMap();
             num_lost_ = 0;
@@ -210,15 +210,6 @@ void VisualOdometry::poseEstimationPnP()
     vector<cv::Point3f> pts3d;
     vector<cv::Point2f> pts2d;
 
-/*    for ( int index:match_2dkp_index_ )
-    {
-        pts2d.push_back ( curr_->vKeys_[index].pt );
-    }
-    for ( MapPoint::Ptr pt:match_3dpts_ )
-    {
-        pts3d.push_back( pt->getPositionCV() );
-    }
-*/
     for(size_t i = 0; i < curr_->N_; ++i){
         if(curr_->vpMapPoints_[i]!=nullptr){
             pts2d.push_back(curr_->vKeys_[i].pt);
@@ -296,7 +287,7 @@ void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<
     Eigen::Vector3d vec3(rvec.at<double>(0, 0), rvec.at<double>(1, 0), rvec.at<double>(2, 0));
     Eigen::AngleAxisd rotvec(vec3.norm(), vec3.normalized());
 
-    T_c_w_estimated_ = SE3<double>(Sophus::Matrix3d(rotvec),
+    SE3<double> T_c_w_estimated = SE3<double>(Sophus::Matrix3d(rotvec),
         Sophus::Vector3d(tvec.at<double>(0, 0), tvec.at<double>(1, 0), tvec.at<double>(2, 0)));
 
     // using bundle adjustment to optimize the pose
@@ -311,10 +302,10 @@ void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<
     g2o::VertexSE3Expmap* pose = new g2o::VertexSE3Expmap();
     pose->setId(0);
 
-    Eigen::Quaterniond se3_r(T_c_w_estimated_.rotationMatrix());
+    Eigen::Quaterniond se3_r(T_c_w_estimated.rotationMatrix());
     g2o::SE3Quat Tcw;// = g2o::SE3Quat(se3_r, T_c_w_estimated_.translation());
     Tcw.setRotation(se3_r);
-    Tcw.setTranslation(T_c_w_estimated_.translation());
+    Tcw.setTranslation(T_c_w_estimated.translation());
     pose->setEstimate(Tcw);
     optimizer.addVertex(pose);
 
@@ -349,7 +340,7 @@ void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<
                 << " error: " << dynamic_cast<EdgeProjectXYZ2UVPoseOnly*>(*it)->error().transpose() << std::endl;
         }
     }
-    T_c_w_estimated_ = SE3<double>(
+    curr_->T_c_w_ = SE3<double>(
         pose->estimate().rotation(),
         pose->estimate().translation()
         );
@@ -364,7 +355,7 @@ bool VisualOdometry::checkEstimatedPose()
         return false;
     }
     // if the motion is too large, it is probably wrong
-    SE3<double> T_r_c = ref_->T_c_w_ * T_c_w_estimated_.inverse();
+    SE3<double> T_r_c = ref_->T_c_w_ * curr_->T_c_w_.inverse();
     Sophus::Vector6d d = T_r_c.log();
     flog_ << "motion change " << d.norm() << endl;
     if ( d.norm() > 3.0 )
@@ -377,7 +368,7 @@ bool VisualOdometry::checkEstimatedPose()
 
 bool VisualOdometry::checkKeyFrame()
 {
-    SE3<double> T_r_c = ref_->T_c_w_ * T_c_w_estimated_.inverse();
+    SE3<double> T_r_c = ref_->T_c_w_ * curr_->T_c_w_.inverse();
     Sophus::Vector6d d = T_r_c.log();
     Vector3d trans = d.head<3>();
     Vector3d rot = d.tail<3>();
@@ -387,7 +378,6 @@ bool VisualOdometry::checkKeyFrame()
 }
 void VisualOdometry::reInitializeFrame()
 {
-    curr_->T_c_w_ = T_c_w_estimated_;
     ref_ = curr_;
     map_->map_points_.clear();
     for (size_t i = 0; i<curr_->vKeys_.size(); i++)
