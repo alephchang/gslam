@@ -37,7 +37,13 @@ public:
     Vector3d    norm_;      // Normal of viewing direction 
     Mat         descriptor_; // Descriptor for matching 
     
-    list<Frame*>    observed_frames_;   // key-frames that can observe this point 
+//    list<Frame*>    observed_frames_;   // key-frames that can observe this point 
+    std::map<std::shared_ptr<Frame>, size_t> observations_;
+    size_t last_frame_seen_;
+    bool track_in_view_;
+    float track_proj_x_ ;
+    float track_proj_y_ ;
+    float track_view_cos_;  
     
     int         matched_times_;     // being an inliner in pose estimation
     int         visible_times_;     // being visible in current frame 
@@ -64,6 +70,11 @@ public:
     inline bool isBad(){
         return !good_;
     }
+    void increaseVisible(int n = 1){
+        visible_times_ += n;
+    }
+    cv::Mat getDescriptor(){return descriptor_;}
+    void computeDistinctiveDescriptors();
 };
 }
 

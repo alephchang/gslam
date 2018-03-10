@@ -19,7 +19,7 @@
 //#include "stdafx.h"
 #include "gslam/common_include.h"
 #include "gslam/mappoint.h"
-
+#include "gslam/ORBmatcher.h"
 namespace gslam
 {
 
@@ -53,5 +53,48 @@ MapPoint::Ptr MapPoint::createMapPoint (
 }
 
 unsigned long MapPoint::factory_id_ = 0;
+
+void MapPoint::computeDistinctiveDescriptors()
+{
+    vector<cv::Mat> vDescriptors;
+    map<Frame::Ptr,size_t> observations = observations_;
+    if(observations.empty()) return;
+    vDescriptors.reserve(observations.size());
+    for(map<Frame::Ptr, size_t>::iterator mit = observations.begin(); mit != observations.end(); ++mit){
+        Frame::Ptr pKF = mit->first;
+        if(!pKF->isBad()){
+            vDescriptors.push_back(pKF->descriptors_.row(mit->second));
+        }
+    }
+    if(vDescriptors.empty()) return;
+    const size_t N = vDescriptors.size();
+    float Distances[N][N];
+    for(size_t i=0;i<N;i++)
+    {
+        Distances[i][i]=0;
+        for(size_t j=i+1;j<N;j++)
+        {
+            int distij = ORBmatcher::DescriptorDistance(vDescriptors[i],vDescriptors[j]);
+            Distances[i][j]=distij;
+            Distances[j][i]=distij;
+        }
+    }
+    // Take the descriptor with least median distance to the rest
+    int BestMedian = INT_MAX;
+    int BestIdx = 0;
+    for(size_t i=0;i<N;i++)
+    {
+        vector<int> vDists(Distances[i],Distances[i]+N);
+        sort(vDists.begin(),vDists.end());
+        int median = vDists[0.5*(N-1)];
+
+        if(median<BestMedian)
+        {
+            BestMedian = median;
+            BestIdx = i;
+        }
+    }
+    descriptor_ = vDescriptors[BestIdx].clone();
+}
 
 }

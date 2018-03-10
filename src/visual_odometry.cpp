@@ -23,6 +23,7 @@
 #include <opencv2/calib3d/calib3d.hpp>
 #include <algorithm>
 #include <boost/timer.hpp>
+#include <boost/concept_check.hpp>
 
 #include "gslam/config.h"
 #include "gslam/visual_odometry.h"
@@ -78,8 +79,8 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         int nmatches = featureMatchingWithRef();
         //poseEstimationPnP();
         int ngoodmatches = poseEstimationOptimization();
-        
         flog_ << "inliers: " << ngoodmatches << "of matches: " << nmatches <<endl;
+        trackLocalMap();
         if ( checkEstimatedPose() == true ) // a good estimation
         {
             validateProjection(); //for validation
@@ -444,81 +445,15 @@ void VisualOdometry::addKeyFrame()
 
 void VisualOdometry::recordKeyFrameForMapPoint()
 {
-    for (auto item : ref_->map_points_2d_) {
-        auto it = map_->map_points_.find(item.first);
-        if (it!= map_->map_points_.end())
-            it->second->observed_frames_.push_back(ref_.get());
-    }
-}
-
-void VisualOdometry::triangulateForNewKeyFrame()
-{
-    //1. find the matched key points between curr key frame and the previous key frame
-    const Frame::Map_Point_2d& mp2d0 = ref_->map_points_2d_;
-    const Frame::Map_Point_2d& mp2d1 = curr_->map_points_2d_;
-    size_t i = 0,  j = 0;
-    std::vector<unsigned long> map_point_idx;
-    std::vector<cv::Point2f> pts0, pts1;
-    for(auto it0 = mp2d0.begin(); it0 != mp2d0.end(); ++it0){
-        auto it1 = mp2d1.find(it0->first);
-        if(it1 != mp2d1.end()){
-            pts0.push_back(ref_->camera_->pixel2camera(it0->second));
-            pts1.push_back(curr_->camera_->pixel2camera(it1->second));
-            map_point_idx.push_back(it0->first);
+    for(size_t i = 0; i < ref_->vpMapPoints_.size(); ++i){
+        if(ref_->vpMapPoints_[i]!=nullptr){
+            ref_->vpMapPoints_[i]->observations_.insert(std::pair<Frame::Ptr, size_t>(ref_, i));
+            ref_->vpMapPoints_[i]->computeDistinctiveDescriptors();
         }
     }
-
-    if (pts0.empty()) {
-        flog_ << "no key point match between current frame and ref frame" << endl;
-        return;
-    }
-    flog_ << "triangulate matche points " << pts0.size() << endl;
-    //2. triangulatePoints
-    const Sophus::SE3d& Tref = ref_->T_c_w_;
-    const Sophus::SE3d& Tcur = curr_->T_c_w_;
-    cv::Mat T0 = (cv::Mat_<float>(3, 4) <<
-        Tref.rotationMatrix()(0, 0), Tref.rotationMatrix()(0, 1), Tref.rotationMatrix()(0, 2), Tref.translation()(0),
-        Tref.rotationMatrix()(1, 0), Tref.rotationMatrix()(1, 1), Tref.rotationMatrix()(1, 2), Tref.translation()(1),
-        Tref.rotationMatrix()(2, 0), Tref.rotationMatrix()(2, 1), Tref.rotationMatrix()(2, 2), Tref.translation()(2)
-        );
-    cv::Mat T1 = (cv::Mat_<float>(3, 4) <<
-        Tcur.rotationMatrix()(0, 0), Tcur.rotationMatrix()(0, 1), Tcur.rotationMatrix()(0, 2), Tcur.translation()(0),
-        Tcur.rotationMatrix()(1, 0), Tcur.rotationMatrix()(1, 1), Tcur.rotationMatrix()(1, 2), Tcur.translation()(1),
-        Tcur.rotationMatrix()(2, 0), Tcur.rotationMatrix()(2, 1), Tcur.rotationMatrix()(2, 2), Tcur.translation()(2)
-        );
-
-    cv::Mat pts4d;
-    cv::triangulatePoints(T0, T1, pts0, pts1, pts4d);
-
-    //update the map points
-    for (i = 0; i < map_point_idx.size(); ++i)
-    {
-        Mat x = pts4d.col(i);
-        x /= x.at<float>(3, 0);
-        Eigen::Vector3d tri_pos = Eigen::Vector3d(x.at<float>(0, 0), x.at<float>(1, 0), x.at<float>(2, 0));
-        
-        std::unordered_map<unsigned long, MapPoint::Ptr>::iterator it = map_->map_points_.find(map_point_idx[i]);
-        if (it != map_->map_points_.end()) {
-            if ((it->second->pos_ - tri_pos).norm() < 0.1 && false) {
-                it->second->pos_ = tri_pos;
-            }
-        }    
-    }
-    //validate
-/*    for (i = 0; i < map_point_idx.size(); ++i) {
-        if(map_->map_points_.find(map_point_idx[i])== map_->map_points_.end())
-            continue;
-        Eigen::Vector3d pos = map_->map_points_[map_point_idx[i]]->pos_;
-        Eigen::Vector3d p0 = ref_->camera_->world2camera(pos, ref_->T_c_w_);
-        Eigen::Vector3d p1 = curr_->camera_->world2camera(pos, curr_->T_c_w_);
-        p0 /= p0(2, 0);
-        p1 /= p1(2, 0);
-        flog_ << "triangulation error: " << (p0 - Eigen::Vector3d(pts0[i].x, pts0[i].y, 1.0)).norm()
-            << " " << (p1 - Eigen::Vector3d(pts1[i].x, pts1[i].y, 1.0)).norm() << endl;
-        //T0*cv::Vec3f(pos(0,0), pos(1,0), pos(2,0))
-    }
-*/
 }
+
+
 
 void VisualOdometry::validateProjection()
 {
@@ -532,26 +467,7 @@ void VisualOdometry::validateProjection()
             << " " << pix0.transpose() << endl;
     }
 }
-void VisualOdometry::dumpMapAndKeyFrames()
-{
-    unordered_map<unsigned long, MapPoint::Ptr >::const_iterator it = map_->map_points_.begin();
-    flog_ << "== Map Information == "<< map_->map_points_.size() << endl;
 
-    for(auto it = map_->map_points_.begin(); it != map_->map_points_.end(); ++it){
-        if (it->second->observed_frames_.size() < 2) continue;
-        flog_ << "Map Point ID: " << it->first <<" oberved times: "<< it->second->observed_frames_.size() << endl;
-        for (auto it_frame = it->second->observed_frames_.begin();
-                    it_frame != it->second->observed_frames_.end(); ++it_frame) {
-            flog_ << (*it_frame)->id_ << " ";
-        }
-        flog_ << endl;
-    }
-    flog_ << "== Key Frames ==" << map_->keyframes_.size() << endl;
-    for (auto it_frame = map_->keyframes_.begin(); it_frame != map_->keyframes_.end(); ++it_frame) {
-        flog_ << (it_frame->second)->id_ << " ";
-    }
-    flog_ << endl;
-}
 void VisualOdometry::addMapPoints()
 {
     // add the new map points into map
@@ -638,6 +554,105 @@ double VisualOdometry::getViewAngle ( Frame::Ptr frame, MapPoint::Ptr point )
     Vector3d n = point->pos_ - frame->getCamCenter();
     n.normalize();
     return acos( n.transpose()*point->norm_ );
+}
+
+void VisualOdometry::updateLocalKeyFrames()
+{
+    map<Frame::Ptr, int> keyframeCounter;
+    for(size_t i = 0; i < curr_->N_; ++i){
+        if(curr_->vpMapPoints_[i]!=nullptr){
+            MapPoint::Ptr pMp = curr_->vpMapPoints_[i];
+            if(!pMp->isBad()){
+                const map<Frame::Ptr,size_t>& observations = pMp->observations_;
+                for(map<Frame::Ptr,size_t>::const_iterator it=observations.begin(), itend=observations.end(); it!=itend; it++)
+                    keyframeCounter[it->first]++;
+            }
+            else{
+                curr_->vpMapPoints_[i]=nullptr;
+            }
+        }
+    }
+    if(keyframeCounter.empty()) return;
+    int max = 0; 
+    Frame::Ptr pKFmax = nullptr;
+    local_key_frames_.clear();
+    local_key_frames_.reserve(3*keyframeCounter.size());
+    // All keyframes that observe a map point are included in the local map. Also check which keyframe shares most points
+    for(map<Frame::Ptr,int>::const_iterator it = keyframeCounter.begin(); it != keyframeCounter.end(); ++it){
+        Frame::Ptr pKF = it->first;
+        if(it->second>max){
+            max = it->second;
+            pKFmax = pKF;
+        }
+        local_key_frames_.push_back(pKF);
+    }
+}
+
+void VisualOdometry::updateLocalMapPoints()
+{
+    local_map_pts_.clear();
+    for(auto kf : local_key_frames_){
+        const vector<MapPoint::Ptr> vMPs = kf->vpMapPoints_;
+        for(auto mp : vMPs){
+            if(mp==nullptr) continue;
+            if(!mp->isBad())
+                local_map_pts_.push_back(mp);
+        }
+    }
+}
+
+void VisualOdometry::searchLocalMapPoints()
+{
+    for(size_t i = 0; i < curr_->vpMapPoints_.size(); ++i){
+        MapPoint::Ptr pMp = curr_->vpMapPoints_[i];
+        if(pMp==nullptr) continue;
+        if(pMp->isBad()){
+            curr_->vpMapPoints_[i]==nullptr;
+        }
+        else{
+            pMp->increaseVisible();
+            pMp->last_frame_seen_ = curr_->id_;
+            pMp->track_in_view_ = false;
+        }
+    }
+    int nTomatch = 0;
+    for(vector<MapPoint::Ptr>::iterator vit=local_map_pts_.begin(), vend=local_map_pts_.end(); vit!=vend; vit++){
+        MapPoint::Ptr pMp = *vit;
+        if(pMp->last_frame_seen_ == curr_->id_) continue;
+        if(pMp->isBad()) continue;
+        if(curr_->isInFrustum(pMp)){
+            pMp->increaseVisible();
+            nTomatch++;
+        }
+    }
+    if(nTomatch>0){
+        ORBmatcher matcher(0.8);
+        matcher.searchByProjection(curr_,local_map_pts_,5);
+    }
+}
+
+bool VisualOdometry::trackLocalMap()
+{
+    updateLocalKeyFrames();
+    updateLocalMapPoints();
+    searchLocalMapPoints();
+    num_inliers_ = Optimizer::poseOptimization(curr_);
+    int nmatch = 0;
+    for(size_t i = 0; i < curr_->vpMapPoints_.size(); ++i){
+        if(curr_->vpMapPoints_[i]){
+            if(curr_->vbOutlier_[i]){
+                curr_->vpMapPoints_[i]=nullptr;
+            }
+            else{
+                if(curr_->vpMapPoints_[i]->observations_.empty()==false)
+                    nmatch++;
+            }
+        }
+    }
+    if(nmatch < 30)
+        return false;
+    else
+        return true;
 }
 
 

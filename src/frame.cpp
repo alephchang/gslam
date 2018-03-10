@@ -17,18 +17,19 @@
  *
  */
 #include "gslam/frame.h"
+#include <boost/concept_check.hpp>
 
 namespace gslam
 {
 shared_ptr<ORBVocabulary>  Frame::pORBvocab_=nullptr;
 Frame::Frame()
-: id_(-1), time_stamp_(-1), camera_(nullptr), is_key_frame_(false)
+: id_(-1), time_stamp_(-1), camera_(nullptr)
 {
 
 }
 
 Frame::Frame ( long id, double time_stamp, SE3<double> T_c_w, Camera::Ptr camera, Mat color, Mat depth )
-: id_(id), time_stamp_(time_stamp), T_c_w_(T_c_w), camera_(camera), color_(color), depth_(depth), is_key_frame_(false)
+: id_(id), time_stamp_(time_stamp), T_c_w_(T_c_w), camera_(camera), color_(color), depth_(depth) 
 {
 
 }
@@ -91,6 +92,51 @@ bool Frame::isInFrame ( const Vector3d& pt_world )
         && pixel(0,0)<color_.cols 
         && pixel(1,0)<color_.rows;
 }
+bool Frame::isInFrustum(MapPoint::Ptr pMp)
+{
+    pMp->track_in_view_ = false;
+    Vector3d P = pMp->pos_;
+    Vector3d Pc = T_c_w_*P;
+    const double &PcX = Pc(0);
+    const double &PcY= Pc(1);
+    const double &PcZ = Pc(2);
+    if(PcZ<0.0) return false;
+    // Project in image and check it is not outside
+    const float invz = 1.0f/PcZ;
+    const float u=camera_->fx_*PcX*invz+camera_->cx_;
+    const float v=camera_->fy_*PcY*invz+camera_->cy_;
+    if(u<0.0 || u > static_cast<double>(color_.cols)) return false;
+    if(v<0.0 || v > static_cast<double>(color_.rows)) return false;
+    
+    Vector3d Pn = pMp->norm_;
+    assert(std::abs<double>(Pn.norm()-1.0)<1e-10);
+    Vector3d Ow = -T_c_w_.rotationMatrix().transpose()*T_c_w_.translation();
+    Vector3d PO = P - Ow;
+    const double viewCos = PO.dot(Pn)/PO.norm();
+    if(viewCos < 0.5) return false;
+    pMp->track_in_view_ = true;
+    pMp->track_proj_x_ = u;
+    pMp->track_proj_y_ = v;
+    pMp->track_view_cos_= viewCos;  
+    return true;
+}
+
+vector<size_t> Frame::getFeaturesInAera(float x, float y, float r) const
+{
+    vector<size_t> vIndices;
+    vIndices.reserve(N_);
+    for(size_t i = 0; i < N_; ++i){
+        const cv::KeyPoint &kp = vKeys_[i];
+        float dx = kp.pt.x - x;
+        float dy = kp.pt.y - y;
+        if(fabs(dx)<r && fabs(dy) < r)
+            vIndices.push_back(i);
+    }
+}
+
+
+
+
 void Frame::addMapPoint2d(unsigned long idx, cv::Point2f pt2d)
 {
     map_points_2d_.insert(std::pair<unsigned long, cv::Point2f>(idx, pt2d));

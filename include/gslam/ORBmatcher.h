@@ -14,7 +14,7 @@ public:
     // Computes the Hamming distance between two ORB descriptors
     static int DescriptorDistance(const cv::Mat &a, const cv::Mat &b);
     int searchByBoW(Frame::Ptr pKF, Frame::Ptr F, std::vector<MapPoint::Ptr> &vpMapPointMatches);
-    
+    int searchByProjection(Frame::Ptr F, const vector<MapPoint::Ptr> &vpMapPoints, const float th);
     
 public:
 

@@ -27,6 +27,7 @@
 #include "3rdparty/DBoW2/DBoW2/BowVector.h"
 #include "3rdparty/DBoW2/DBoW2/FeatureVector.h"
 
+using gslam::MapPoint;
 namespace gslam 
 {
     
@@ -42,8 +43,7 @@ public:
     Mat                            color_, depth_; // color and depth image 
     typedef std::unordered_map<unsigned long, cv::Point2f> Map_Point_2d;
     Map_Point_2d map_points_2d_;
-    bool                           is_key_frame_;  // whether a key-frame
-    std::vector<MapPoint::Ptr>     vpMapPoints_;  // MapPoints associated to keypoints, NULL pointer if no association.
+    std::vector<gslam::MapPoint::Ptr>     vpMapPoints_;  // MapPoints associated to keypoints, NULL pointer if no association.
     std::vector<cv::KeyPoint>      vKeys_;
     cv::Mat                        descriptors_;
     // Bag of Words Vector structures.
@@ -72,10 +72,14 @@ public: // data members
     
     // check if a point is in this frame 
     bool isInFrame( const Vector3d& pt_world );
+    
+    vector<size_t> getFeaturesInAera(float x, float y, float r) const;
 
+    bool isInFrustum(MapPoint::Ptr pMp);
     void addMapPoint2d(unsigned long idx, cv::Point2f pt2d);
     void sortMapPoint2d();
     void computeBoW();
+    bool isBad(){return false;}
 };
 
 }

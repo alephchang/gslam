@@ -138,5 +138,63 @@ int ORBmatcher::searchByBoW(Frame::Ptr pKF,Frame::Ptr F, vector<MapPoint::Ptr> &
     }
     return nmatches;
 }   
+
+int ORBmatcher::searchByProjection(Frame::Ptr F, const vector< MapPoint::Ptr >& vpMapPoints, const float th)
+{
+    int nmatches=0;
+    for(size_t i=0; i<vpMapPoints.size(); i++){
+        MapPoint::Ptr pMp = vpMapPoints[i];
+        if(pMp->isBad()) continue;
+        float r = 4* th;
+        const vector<size_t> vIndices = F->getFeaturesInAera(pMp->track_proj_x_, pMp->track_proj_y_, r);
+        if(vIndices.empty()) continue;
+        const cv::Mat MPdescriptor = pMp->getDescriptor();
+        int bestDist=256;
+        int bestLevel= -1;
+        int bestDist2=256;
+        int bestLevel2 = -1;
+        int bestIdx =-1 ;
+        for(vector<size_t>::const_iterator vit=vIndices.begin(), vend=vIndices.end(); vit!=vend; vit++){
+            const size_t idx = *vit;
+            ///TODO:
+            // how to add mappoint to the map??? Ans: update local map will add mappoint
+            if(F->vpMapPoints_[idx])
+                if(F->vpMapPoints_[idx]->observations_.empty()==false)
+                    continue;
+            const cv::Mat &d = F->descriptors_.row(idx);
+            const int dist = DescriptorDistance(MPdescriptor,d);
+            if(dist<bestDist){
+                bestDist2=bestDist;
+                bestDist=dist;
+                bestLevel2 = bestLevel;
+                bestLevel = F->vKeys_[idx].octave;
+                bestIdx=idx;
+            }
+            else if(dist<bestDist2){
+                bestLevel2 = F->vKeys_[idx].octave;
+                bestDist2=dist;
+            }
+        }
+        if(bestDist<=TH_HIGH){
+            if(bestLevel==bestLevel2 && bestDist>mfNNratio*bestDist2)
+                continue;
+
+            F->vpMapPoints_[bestIdx]=pMp;
+            nmatches++;
+        }
+    }
+    return nmatches;
+}
+
     
 }
+
+
+
+
+
+
+
+
+
+

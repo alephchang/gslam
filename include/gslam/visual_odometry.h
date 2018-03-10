@@ -43,10 +43,8 @@ public:
     
     Frame::Ptr  ref_;       // reference key-frame 
     Frame::Ptr  curr_;      // current frame 
-	vector<unsigned long> key_frame_ids_;
+    vector<unsigned long> key_frame_ids_;
     cv::Ptr<ORB_SLAM2::ORBextractor> orb_;  // orb detector and computer 
-    //vector<cv::KeyPoint>    keypoints_curr_;    // keypoints in current frame
-    //Mat                     descriptors_curr_;  // descriptor in current frame 
     
     cv::FlannBasedMatcher   matcher_flann_;     // flann matcher
     vector<MapPoint::Ptr>   match_3dpts_;       // matched 3d points 
@@ -65,10 +63,12 @@ public:
     int min_inliers_;       // minimum inliers
     double key_frame_min_rot;   // minimal rotation of two key-frames
     double key_frame_min_trans; // minimal translation of two key-frames
-    double  map_point_erase_ratio_; // remove map point ratio
+    double map_point_erase_ratio_; // remove map point ratio
 
-	//log file output
-	std::ofstream flog_;
+    vector<Frame::Ptr> local_key_frames_;
+    vector<MapPoint::Ptr> local_map_pts_;
+    //log file output
+    std::ofstream flog_;
     
 public: // functions 
     VisualOdometry();
@@ -76,8 +76,8 @@ public: // functions
     
     bool addFrame( Frame::Ptr frame );      // add a new frame 
 
-	bool setLogFile(const std::string& logpath);
-	void dumpMapAndKeyFrames();
+    bool setLogFile(const std::string& logpath);
+    void dumpMapAndKeyFrames();
     
 protected:  
     // inner operation 
@@ -86,7 +86,7 @@ protected:
     int featureMatchingWithRef();
     void poseEstimationPnP(); 
     int poseEstimationOptimization();
-    void trackLocalMap(); //based on the pose estimation, find more match between map and keypoints;
+    bool trackLocalMap(); //based on the pose estimation, find more match between map and keypoints;
     void optimizeMap();
     
     void addKeyFrame();
@@ -102,6 +102,10 @@ protected:
     void optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, Mat& inliers,
             const Mat& rvec, const Mat& tvec);
     void reInitializeFrame();
+    
+    void updateLocalKeyFrames();
+    void updateLocalMapPoints();
+    void searchLocalMapPoints();
     
 };
 }
