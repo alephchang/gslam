@@ -90,7 +90,6 @@ protected:
     void optimizeMap();
     
     void addKeyFrame();
-    void recordKeyFrameForMapPoint();
     void triangulateForNewKeyFrame();
     void addMapPoints();
     bool checkEstimatedPose(); 
@@ -106,6 +105,8 @@ protected:
     void updateLocalKeyFrames();
     void updateLocalMapPoints();
     void searchLocalMapPoints();
+    
+    void initialize();
     
 };
 }

@@ -45,7 +45,7 @@ public:
     float track_proj_y_ ;
     float track_view_cos_;  
     
-    int         matched_times_;     // being an inliner in pose estimation
+    int         found_times_;     // being an inliner in pose estimation
     int         visible_times_;     // being visible in current frame 
     
     MapPoint();
@@ -53,7 +53,7 @@ public:
         unsigned long id, 
         const Vector3d& position, 
         const Vector3d& norm, 
-        Frame* frame=nullptr, 
+        std::shared_ptr<Frame> frame=nullptr, 
         const Mat& descriptor=Mat() 
     );
     
@@ -66,7 +66,7 @@ public:
         const Vector3d& pos_world, 
         const Vector3d& norm_,
         const Mat& descriptor,
-        Frame* frame );
+        std::shared_ptr<Frame> frame );
     inline bool isBad(){
         return !good_;
     }
@@ -75,6 +75,8 @@ public:
     }
     cv::Mat getDescriptor(){return descriptor_;}
     void computeDistinctiveDescriptors();
+    void addObservation(std::shared_ptr<Frame>, size_t i);
+    void updateNormalAndDepth();
 };
 }
 

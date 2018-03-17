@@ -41,8 +41,6 @@ public:
     SE3<double>                    T_c_w_;      // transform from world to camera
     Camera::Ptr                    camera_;     // Pinhole RGBD Camera model 
     Mat                            color_, depth_; // color and depth image 
-    typedef std::unordered_map<unsigned long, cv::Point2f> Map_Point_2d;
-    Map_Point_2d map_points_2d_;
     std::vector<gslam::MapPoint::Ptr>     vpMapPoints_;  // MapPoints associated to keypoints, NULL pointer if no association.
     std::vector<cv::KeyPoint>      vKeys_;
     cv::Mat                        descriptors_;
@@ -76,7 +74,7 @@ public: // data members
     vector<size_t> getFeaturesInAera(float x, float y, float r) const;
 
     bool isInFrustum(MapPoint::Ptr pMp);
-    void addMapPoint2d(unsigned long idx, cv::Point2f pt2d);
+    void addMapPoint(MapPoint::Ptr pMp, size_t i);
     void sortMapPoint2d();
     void computeBoW();
     bool isBad(){return false;}

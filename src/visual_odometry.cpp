@@ -55,6 +55,32 @@ VisualOdometry::~VisualOdometry()
 {
     flog_.close();
 }
+void VisualOdometry::initialize()
+{
+    if( curr_->vKeys_.size() < 400) return;
+    for ( size_t i=0; i<curr_->vKeys_.size(); i++ )
+    {
+        double d = curr_->findDepth ( curr_->vKeys_[i] );
+        if ( d < 0 ) 
+            continue;
+        Vector3d p_world = ref_->camera_->pixel2world (
+            Vector2d ( curr_->vKeys_[i].pt.x, curr_->vKeys_[i].pt.y ), curr_->T_c_w_, d
+        );
+        Vector3d n = p_world - ref_->getCamCenter();
+        n.normalize();
+        MapPoint::Ptr pNewMp= MapPoint::createMapPoint(
+            p_world, n, curr_->descriptors_.row(i).clone(), curr_);
+        pNewMp->addObservation(curr_, i);
+        curr_->addMapPoint(pNewMp, i);
+        pNewMp->computeDistinctiveDescriptors();
+        pNewMp->updateNormalAndDepth();
+        map_->insertMapPoint(pNewMp);
+    }
+    key_frame_ids_.push_back(curr_->id_);
+    map_->insertKeyFrame ( curr_ );
+    curr_->computeBoW();
+    state_ = OK;
+}
 
 bool VisualOdometry::addFrame ( Frame::Ptr frame )
 {
@@ -63,11 +89,11 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
     {
     case INITIALIZING:
     {
-        state_ = OK;
+        //state_ = OK;
         curr_ = ref_ = frame;
         // extract features from first frame and add them into map
         detectAndComputeFeatures();
-        addKeyFrame();      // the first frame is a key-frame
+        initialize();
         break;
     }
     case OK:
@@ -77,9 +103,8 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         detectAndComputeFeatures();
         //featureMatching();
         int nmatches = featureMatchingWithRef();
-        //poseEstimationPnP();
         int ngoodmatches = poseEstimationOptimization();
-        flog_ << "inliers: " << ngoodmatches << "of matches: " << nmatches <<endl;
+        flog_ << "inliers: " << ngoodmatches << " of matches: " << nmatches <<endl;
         trackLocalMap();
         if ( checkEstimatedPose() == true ) // a good estimation
         {
@@ -95,7 +120,7 @@ bool VisualOdometry::addFrame ( Frame::Ptr frame )
         }
         else // bad estimation due to various reasons
         {
-            //reInitializeFrame();
+            reInitializeFrame();
             curr_->T_c_w_ = ref_->T_c_w_;
             num_lost_++;
             if ( num_lost_ > max_num_lost_ )
@@ -205,58 +230,6 @@ int VisualOdometry::featureMatchingWithRef()
     return nmatch;
 }
 
-void VisualOdometry::poseEstimationPnP()
-{
-    // construct the 3d 2d observations
-    vector<cv::Point3f> pts3d;
-    vector<cv::Point2f> pts2d;
-
-    for(size_t i = 0; i < curr_->N_; ++i){
-        if(curr_->vpMapPoints_[i]!=nullptr){
-            pts2d.push_back(curr_->vKeys_[i].pt);
-            pts3d.push_back(curr_->vpMapPoints_[i]->getPositionCV());
-        }
-    }
-    Mat K = ( cv::Mat_<float> ( 3,3 ) <<
-              ref_->camera_->fx_, 0, ref_->camera_->cx_,
-              0, ref_->camera_->fy_, ref_->camera_->cy_,
-              0,0,1
-            );
-    Eigen::AngleAxisd rotvec0(curr_->T_c_w_.rotationMatrix());
-
-    Mat rotM = (cv::Mat_<float>(3, 3) <<
-        curr_->T_c_w_.rotationMatrix()(0, 0), curr_->T_c_w_.rotationMatrix()(0, 1), curr_->T_c_w_.rotationMatrix()(0, 2),
-        curr_->T_c_w_.rotationMatrix()(1, 0), curr_->T_c_w_.rotationMatrix()(1, 1), curr_->T_c_w_.rotationMatrix()(1, 2),
-        curr_->T_c_w_.rotationMatrix()(2, 0), curr_->T_c_w_.rotationMatrix()(2, 1), curr_->T_c_w_.rotationMatrix()(2, 2));
-    Mat rvec;
-    Rodrigues(rotM, rvec);
-    Mat tvec = (cv::Mat_<float>(3, 1) << curr_->T_c_w_.translation()[0],
-        curr_->T_c_w_.translation()[1], curr_->T_c_w_.translation()[2]);
-    Mat inliers;
-    cv::solvePnPRansac(pts3d, pts2d, K, Mat(), rvec, tvec, true, 100, 4.0, 0.99, inliers, cv::SOLVEPNP_ITERATIVE);
-
-    num_inliers_ = 0;// inliers.rows;
-
-    optimizePnP(pts3d, pts2d, inliers, rvec, tvec);
-
-    //add map points to the current frame
-    curr_->vpMapPoints_.assign(curr_->N_, nullptr);//zero all the map points, and only record the inliers
-    for (int i = 0; i < inliers.rows; ++i)
-    {
-        int index = inliers.at<int>(i, 0);
-        if (index > 0) {
-            curr_->addMapPoint2d(match_3dpts_[index]->id_, pts2d[index]);
-            curr_->vpMapPoints_[match_2dkp_index_[index]] = match_3dpts_[index];
-            num_inliers_++;
-        }
-    }
-//    flog_ << "key point range: " << curr_->map_points_2d_.front().first
-//        << " " << curr_->map_points_2d_.back().first << endl;
-    //flog_<<"T_c_w_estimated_ after g2o: "<<endl<<T_c_w_estimated_.matrix()<<endl;
-    flog_<<"pnp inliers: "<<num_inliers_
-             << " good matches: " << match_3dpts_.size() << endl;
-}
-
 int VisualOdometry::poseEstimationOptimization()
 {
     num_inliers_ = Optimizer::poseOptimization(curr_);
@@ -282,71 +255,6 @@ int VisualOdometry::poseEstimationOptimization()
     return nmatches;
 }
 
-void VisualOdometry::optimizePnP(const vector<cv::Point3f>& pts3d, const vector<cv::Point2f>& pts2d, Mat& inliers,
-    const Mat& rvec, const Mat& tvec)
-{
-    Eigen::Vector3d vec3(rvec.at<double>(0, 0), rvec.at<double>(1, 0), rvec.at<double>(2, 0));
-    Eigen::AngleAxisd rotvec(vec3.norm(), vec3.normalized());
-
-    SE3<double> T_c_w_estimated = SE3<double>(Sophus::Matrix3d(rotvec),
-        Sophus::Vector3d(tvec.at<double>(0, 0), tvec.at<double>(1, 0), tvec.at<double>(2, 0)));
-
-    // using bundle adjustment to optimize the pose
-    typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 2>> Block;
-    typedef g2o::LinearSolverDense<Block::PoseMatrixType> Linear;
-
-    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(
-        g2o::make_unique<Block>(g2o::make_unique<Linear>()));
-    g2o::SparseOptimizer optimizer;
-    optimizer.setAlgorithm(solver);
-
-    g2o::VertexSE3Expmap* pose = new g2o::VertexSE3Expmap();
-    pose->setId(0);
-
-    Eigen::Quaterniond se3_r(T_c_w_estimated.rotationMatrix());
-    g2o::SE3Quat Tcw;// = g2o::SE3Quat(se3_r, T_c_w_estimated_.translation());
-    Tcw.setRotation(se3_r);
-    Tcw.setTranslation(T_c_w_estimated.translation());
-    pose->setEstimate(Tcw);
-    optimizer.addVertex(pose);
-
-
-    // edges
-    for (int i = 0; i<inliers.rows; i++)
-    {
-        int index = inliers.at<int>(i, 0);
-        // 3D -> 2D projection
-        EdgeProjectXYZ2UVPoseOnly* edge = new EdgeProjectXYZ2UVPoseOnly();
-        edge->setId(i);
-        edge->setVertex(0, pose);
-        edge->camera_ = curr_->camera_.get();
-        edge->point_ = Vector3d(pts3d[index].x, pts3d[index].y, pts3d[index].z);
-        edge->setMeasurement(Vector2d(pts2d[index].x, pts2d[index].y));
-        edge->setInformation(Eigen::Matrix2d::Identity());
-        edge->setRobustKernel(new g2o::RobustKernelHuber());
-        optimizer.addEdge(edge);
-        // set the inlier map points 
-        match_3dpts_[index]->matched_times_++;
-        //flog_ << edge->point_.transpose() << " " << pts2d[index].x << " " << pts2d[index].y << endl;
-    }
-
-    optimizer.initializeOptimization();
-    optimizer.optimize(10);
-    auto edges = optimizer.edges();
-    for (auto it = edges.begin(); it != edges.end(); ++it) {
-        if (inliers.rows> 50 && dynamic_cast<EdgeProjectXYZ2UVPoseOnly*>(*it)->error().norm() > 4.0) {
-            inliers.at<int>((*it)->id(), 0) = -1;
-            flog_ << "point id: " << (*it)->vertex(0)->id() << " camera id: " << curr_->id_
-                << " pixel locatoin: " << dynamic_cast<EdgeProjectXYZ2UVPoseOnly*>(*it)->measurement().transpose()
-                << " error: " << dynamic_cast<EdgeProjectXYZ2UVPoseOnly*>(*it)->error().transpose() << std::endl;
-        }
-    }
-    curr_->T_c_w_ = SE3<double>(
-        pose->estimate().rotation(),
-        pose->estimate().translation()
-        );
-
-}
 bool VisualOdometry::checkEstimatedPose()
 {
     // check if the estimated pose is good
@@ -391,47 +299,67 @@ void VisualOdometry::reInitializeFrame()
         );
         Vector3d n = p_world - ref_->getCamCenter();
         n.normalize();
-        MapPoint::Ptr map_point = MapPoint::createMapPoint(
-            p_world, n, curr_->descriptors_.row(i).clone(), curr_.get()
-        );
-        map_->insertMapPoint(map_point);
-        curr_->addMapPoint2d(map_point->id_, curr_->vKeys_[i].pt);
-        curr_->vpMapPoints_[i] = map_point;
+        MapPoint::Ptr pNewMp = MapPoint::createMapPoint(
+            p_world, n, curr_->descriptors_.row(i).clone(), curr_);
+        map_->insertMapPoint(pNewMp);
+        curr_->vpMapPoints_[i] = pNewMp;
+        curr_->addMapPoint(pNewMp,i);
+        pNewMp->addObservation(curr_, i);
+        pNewMp->computeDistinctiveDescriptors();
     }
     key_frame_ids_.push_back(curr_->id_);
     map_->insertKeyFrame(curr_);
-    recordKeyFrameForMapPoint();
     flog_ << "re init frame " << endl;
 }
 
 void VisualOdometry::addKeyFrame()
 {
-    if ( map_->keyframes_.empty() )
-    {
-        // first key-frame, add all 3d points into map
-        for ( size_t i=0; i<curr_->vKeys_.size(); i++ )
-        {
-            double d = curr_->findDepth ( curr_->vKeys_[i] );
-            if ( d < 0 ) 
-                continue;
-            Vector3d p_world = ref_->camera_->pixel2world (
-                Vector2d ( curr_->vKeys_[i].pt.x, curr_->vKeys_[i].pt.y ), curr_->T_c_w_, d
-            );
-            Vector3d n = p_world - ref_->getCamCenter();
-            n.normalize();
-            MapPoint::Ptr map_point = MapPoint::createMapPoint(
-                p_world, n, curr_->descriptors_.row(i).clone(), curr_.get()
-            );
-            map_->insertMapPoint( map_point );
-            curr_->addMapPoint2d(map_point->id_, curr_->vKeys_[i].pt);
-            curr_->vpMapPoints_[i] = map_point;
+    //1. sort the point by depth
+    vector<pair<double, size_t> > vDepthIdx;
+    for(size_t i = 0; i < curr_->N_; ++i){
+        double z = curr_->findDepth(curr_->vKeys_[i]);
+        if(z>0)
+            vDepthIdx.push_back(make_pair(z, i));
+    }
+    //2. add the point
+    int nPts = 0;
+    flog_ <<"map point num before add keyframe: " << map_->map_points_.size() << " ";
+    if(!vDepthIdx.empty()){
+        sort(vDepthIdx.begin(),vDepthIdx.end());
+        for(size_t j = 0; j < vDepthIdx.size(); ++j){
+            int i = vDepthIdx[j].second;
+            bool bCreateNew = false;
+            MapPoint::Ptr pMp = curr_->vpMapPoints_[i];
+            if(pMp==nullptr)
+                bCreateNew = true;
+            else if(pMp->observations_.empty()){
+                bCreateNew = true;
+                curr_->vpMapPoints_[i] = nullptr;
+            }
+            if(bCreateNew){
+                Vector3d p_world = curr_->camera_->pixel2world(
+                    Vector2d( curr_->vKeys_[i].pt.x, curr_->vKeys_[i].pt.y ),
+                    curr_->T_c_w_, vDepthIdx[j].first );
+                Vector3d n = p_world - curr_->getCamCenter();
+                n.normalize();
+                MapPoint::Ptr pNewMp = MapPoint::createMapPoint(p_world, n, curr_->descriptors_.row(i).clone(), curr_);
+                pNewMp->addObservation(curr_, i);
+                curr_->addMapPoint(pNewMp, i);
+                pNewMp->computeDistinctiveDescriptors();
+                pNewMp->updateNormalAndDepth();
+                map_->insertMapPoint(pNewMp);
+            }
+            nPts++;
+            if(nPts>100)
+                break;
         }
     }
+    flog_ << " after create new key frame: " << map_->map_points_.size()<< endl;
+    
     key_frame_ids_.push_back(curr_->id_);
     map_->insertKeyFrame ( curr_ );
     ref_ = curr_;
     curr_->computeBoW();
-    recordKeyFrameForMapPoint();
     if (key_frame_ids_.size() > 1) {
         vector<unsigned long> frame_ids;
         if (key_frame_ids_.size() == 2)
@@ -443,25 +371,14 @@ void VisualOdometry::addKeyFrame()
     
 }
 
-void VisualOdometry::recordKeyFrameForMapPoint()
-{
-    for(size_t i = 0; i < ref_->vpMapPoints_.size(); ++i){
-        if(ref_->vpMapPoints_[i]!=nullptr){
-            ref_->vpMapPoints_[i]->observations_.insert(std::pair<Frame::Ptr, size_t>(ref_, i));
-            ref_->vpMapPoints_[i]->computeDistinctiveDescriptors();
-        }
-    }
-}
-
-
-
 void VisualOdometry::validateProjection()
 {
-    for(auto it = curr_->map_points_2d_.begin(); it != curr_->map_points_2d_.end(); ++it){
-        if(map_->map_points_.find(it->first) == map_->map_points_.end()) continue;
-        Eigen::Vector3d pos = map_->map_points_[it->first]->pos_;
+    for(size_t i = 0; i < curr_->vpMapPoints_.size(); ++i){
+        MapPoint::Ptr pMp = curr_->vpMapPoints_[i];
+        if(pMp == nullptr) continue;
+        Eigen::Vector3d pos = pMp->pos_;
         Eigen::Vector2d pix1 = curr_->camera_->world2pixel(pos, curr_->T_c_w_);
-        Eigen::Vector2d pix0(it->second.x, it->second.y);
+        Eigen::Vector2d pix0(curr_->vKeys_[i].pt.x, curr_->vKeys_[i].pt.y);
         if ((pix1 - pix0).norm() > 5.0)
             flog_ << "large error for projection: " << pix1.transpose()
             << " " << pix0.transpose() << endl;
@@ -489,8 +406,7 @@ void VisualOdometry::addMapPoints()
         Vector3d n = p_world - ref_->getCamCenter();
         n.normalize();
         MapPoint::Ptr map_point = MapPoint::createMapPoint(
-            p_world, n, curr_->descriptors_.row(i).clone(), curr_.get()
-        );
+            p_world, n, curr_->descriptors_.row(i).clone(), curr_);
         map_->insertMapPoint( map_point );
         curr_->vpMapPoints_[i] = map_point;
         add_num++;
@@ -505,30 +421,29 @@ void VisualOdometry::optimizeMap()
     int outframe = 0, lowmatchratio = 0, largeangle = 0;
     for ( auto iter = map_->map_points_.begin(); iter != map_->map_points_.end(); )
     {
-        if ( !curr_->isInFrame(iter->second->pos_) )
-        {
+        MapPoint::Ptr pMp = iter->second;
+        if ( !curr_->isInFrame(iter->second->pos_) )  {
             iter = map_->map_points_.erase(iter);
             outframe++;
             continue;
         }
-        float match_ratio = float(iter->second->matched_times_)/iter->second->visible_times_;
-        if ( match_ratio < map_point_erase_ratio_ )
-        {
+        float match_ratio = float(pMp->found_times_)/pMp->visible_times_;
+        if ( match_ratio < map_point_erase_ratio_ ) {
             iter = map_->map_points_.erase(iter);
             lowmatchratio++;
             continue;
         }
+        if (pMp->last_frame_seen_ + 10 < curr_->id_){
+            iter = map_->map_points_.erase(iter);
+            continue;
+        }
         
-        double angle = getViewAngle( curr_, iter->second );
+        double angle = getViewAngle( curr_, pMp );
         if ( angle > M_PI/6. )
         {
             iter = map_->map_points_.erase(iter);
             largeangle++;
             continue;
-        }
-        if ( iter->second->good_ == false )
-        {
-            // TODO try triangulate this map point 
         }
         iter++;
     }
@@ -538,9 +453,8 @@ void VisualOdometry::optimizeMap()
         if (match_2dkp_index_.size() > 100 && num_inliers_ * 2 < match_2dkp_index_.size())
             flog_ << "add map points because of low inliers ratio" << endl;
     }
-    if ( map_->map_points_.size() > 1000 )  
+    if ( map_->map_points_.size() > 1000 && map_point_erase_ratio_<0.30)  
     {
-        // TODO map is too large, remove some one 
         map_point_erase_ratio_ += 0.05;
     }
     else 
@@ -639,13 +553,16 @@ bool VisualOdometry::trackLocalMap()
     num_inliers_ = Optimizer::poseOptimization(curr_);
     int nmatch = 0;
     for(size_t i = 0; i < curr_->vpMapPoints_.size(); ++i){
-        if(curr_->vpMapPoints_[i]){
+        MapPoint::Ptr pMp = curr_->vpMapPoints_[i];
+        if(pMp){
             if(curr_->vbOutlier_[i]){
                 curr_->vpMapPoints_[i]=nullptr;
             }
             else{
-                if(curr_->vpMapPoints_[i]->observations_.empty()==false)
+                if(pMp->observations_.empty()==false)
                     nmatch++;
+                pMp->found_times_++;
+                pMp->last_frame_seen_ = curr_->id_;
             }
         }
     }

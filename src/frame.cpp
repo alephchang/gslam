@@ -132,16 +132,16 @@ vector<size_t> Frame::getFeaturesInAera(float x, float y, float r) const
         if(fabs(dx)<r && fabs(dy) < r)
             vIndices.push_back(i);
     }
+    return vIndices;
 }
 
 
 
 
-void Frame::addMapPoint2d(unsigned long idx, cv::Point2f pt2d)
+void Frame::addMapPoint(MapPoint::Ptr pMp, size_t i)
 {
-    map_points_2d_.insert(std::pair<unsigned long, cv::Point2f>(idx, pt2d));
+    vpMapPoints_[i] = pMp;
 }
-
 std::vector<cv::Mat> toDescriptorVector(const cv::Mat &Descriptors)
 {
     std::vector<cv::Mat> vDesc;
